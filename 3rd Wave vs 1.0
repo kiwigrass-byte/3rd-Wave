@@ -1,0 +1,374 @@
+-- Preset for Groove Synth 3rd Wave
+-- September 2026
+-- by @kiwigrass
+
+-- 3rd wave model id number: 0x01 for 24 voice products, 0x02 for 8 voice
+local MODEL_BYTE = 0x02
+
+local currentDevice  = devices.get(1)
+local deviceId = currentDevice:getId()
+local channel = currentDevice:getChannel ()
+local port      = currentDevice:getPort ()
+
+-- populate the bottom RH screen information display on load
+local authorDate = "kiwigrass 2026" 
+info.setText(authorDate)
+
+-- header for 3rd Wave sysEx messages (will recognize either model id byte)
+local SYSEX_HEADER = {0x00,0x02,0x4A,0x02}
+
+-- Tracks how many ticks have passed for the timer.onTick function
+local amountTicks = 0 
+-- Set timer tick rate (e.g., every 200 milliseconds) 
+timer.setPeriod(100) 
+
+-- events to track
+events.subscribe(PAGES | POTS)
+
+-- control reference numbers
+PROG_NUM_CTRL = 3
+
+-- parameter numbers
+PROG_NUM_PARAM = 10033
+BANK_NUM_PARAM = 10032
+
+-- 3rd Wave-reported channel (source of truth when available)
+local midiChannel = nil
+
+-- assign MIDI channel based on Peak
+function assignChannel(valueObject, value)
+  device:setChannel(midiChannel)
+  channel = device:getChannel()
+  deviceId = device:getId()
+  port = device:getPort()
+end
+
+-- initialize program sysEx data
+local progData = {}
+
+local sysExPatch = {}   -- sysExPatch[byte] – store patch data
+
+-- NRPN reassembly registers
+local msbNum = 0
+local lsbNum = 0
+
+-- to store 100 program names in 5 banks
+local nameBank = {}   
+-- 0 = bank A, 1= bank B, 2 = bank C, 3 = bank D, 4 = bank E 
+for y = 0,4 do        
+    nameBank[y] = {}
+    -- program numbers 0..99
+    for z = 0,99 do  
+        nameBank[y][z] = ""
+    end
+end
+
+-- ---------- Persistence helpers for patch-name cache ----------
+-- Electra One runtime in this preset:
+--   persist(table)
+--   recall(table)
+-- We persist a tagged flat map and rebuild nameBank on load.
+
+-- a tag to keep track of versions of patch-banks on the Peak 
+local PERSIST_TAG = "3rdWaveProgNamesV1"
+
+local function makePatchKey(bank, patch)
+  return string.format("b%d_p%03d", bank, patch) -- bank 0..4, patch 0..99
+end
+
+local function flattenNameBank(src)
+  local flat = {}
+  local count = 0
+  for b = 0, 4 do
+    for p = 0, 99 do
+      local v = src[b] and src[b][p] or ""
+      v = tostring(v or "")
+      flat[makePatchKey(b, p)] = v
+      if v ~= "" then count = count + 1 end
+    end
+  end
+  return flat, count
+end
+
+local function inflateNameBank(flat)
+  local dst = {}
+  local count = 0
+  for b = 0, 4 do
+    dst[b] = {}
+    for p = 0, 99 do
+      local v = (flat and flat[makePatchKey(b, p)]) or ""
+      dst[b][p] = v
+      if v ~= "" then count = count + 1 end
+    end
+  end
+  return dst, count
+end
+
+local function saveNameBank()
+  local flat, count = flattenNameBank(nameBank)
+  local payload = {
+    _tag = PERSIST_TAG,
+    names = flat
+  }
+  local ok, err = pcall(persist, payload)
+  if ok then
+    print(string.format("nameBank persisted (%d non-empty names)", count))
+  else
+    print("nameBank persist failed: " .. tostring(err))
+  end
+end
+
+local function loadNameBank()
+  local payload = {}
+  local ok, err = pcall(recall, payload) -- recall(destinationTable)
+  if not ok then
+    print("nameBank recall failed: " .. tostring(err))
+    return
+  end
+  if payload._tag ~= PERSIST_TAG then
+    print("nameBank recall: no matching persisted payload tag")
+    return
+  end
+  if type(payload.names) ~= "table" then
+    print("nameBank recall: payload.names missing/invalid")
+    return
+  end
+  local rebuilt, count = inflateNameBank(payload.names)
+  nameBank = rebuilt
+  print(string.format("nameBank restored (%d non-empty names)", count))
+end
+
+-- Debounced/controlled persistence during large scans
+local nameBankDirty = false
+local nameBankUpdates = 0
+local SAVE_EVERY_N_UPDATES = 50 -- tune if desired
+
+local function markNameBankDirty()
+  nameBankDirty = true
+  nameBankUpdates = nameBankUpdates + 1
+  -- periodic checkpoint save during long scans
+  if (nameBankUpdates % SAVE_EVERY_N_UPDATES) == 0 then
+    saveNameBank()
+    nameBankDirty = false
+  end
+end
+
+local function flushNameBankIfDirty()
+  if nameBankDirty then
+    saveNameBank()
+    nameBankDirty = false
+  end
+end
+
+function preset.onLoad()
+  loadNameBank()  -- restore cached patch names first
+  pages.display(1)
+end
+
+-- helper function to get a specific bit series from a value
+local function getBits(value, start, length) 
+    -- Calculate the mask by shifting (1 << length) - 1 to the correct position
+    local mask = (1 << length) - 1
+    -- Shift the mask to the starting position and apply it to the value
+    return (value >> (9 - start - length)) & mask
+end
+
+-- helper function to concatenate two arrays. Used for SysEx message construction
+local function concat(t1, t2)
+  local t = {}
+  for i=1,#t1 do t[#t+1] = t1[i] end
+  for i=1,#t2 do t[#t+1] = t2[i] end
+  return t
+end
+
+-- ── Helper: safe controls.get() (pcall-wrapped for deleted/invalid IDs) ────────
+local function safeGet(id)
+  local ok, c = pcall(controls.get, id)
+  return ok and c or nil
+end
+
+function displayProg (valueObject, value)
+  local bankTxt={"A","B","C","D"} -- abbreviations of the bank names
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUM_PARAM) + 1
+  local progName = nameBank[bankNum][value]
+  local c = safeGet(PROG_NUM_CTRL); if c then c:setName(progName) end
+  return (bankTxt[bankNum].." "..string.format("%02d",value))
+end
+
+---------- midi request functions ---------------------
+-- request device info from the 3rd Wave
+function deviceInquiry(valueObject,value)
+  local message = {0x7E,0x00,0x06,0x01}
+  midi.sendSysex(port,message)
+end
+
+-- request data for a 3rd Wave program (including sequencer data)
+function getProgramData(valueObject,value)
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUM_PARAM)
+  local progNum = parameterMap.get (deviceId, PT_VIRTUAL, PROG_NUM_PARAM)
+  local message = concat(SYSEX_HEADER,{0x05,bankNum,progNum})
+  midi.sendSysex(port,message)
+end
+
+-- request a 3rd Wave program name
+function getProgramName(valueObject,value)
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUM_PARAM)
+  local progNum = parameterMap.get (deviceId, PT_VIRTUAL, PROG_NUM_PARAM)
+  local message = concat(SYSEX_HEADER,{0x10,bankNum,progNum})
+  midi.sendSysex(port,message)
+end
+
+-- request the data in the 3rd Wave's edit buffer
+function getBufferData(valueObject,value)
+  local message = concat(SYSEX_HEADER,{0x06})
+  midi.sendSysex(port,message)
+end
+
+-------- midi send functions ---------------------
+function sendSimpleNRPN(nrpn, value)
+  midi.sendControlChange (port , channel , 99, math.floor(nrpn/128))
+  midi.sendControlChange (port , channel , 98, nrpn%128)
+  midi.sendControlChange (port , channel , 6, value)
+end
+
+function selectIt(valueObject, value)
+  if value==0 then return end
+  local message = valueObject:getMessage ()
+  local parameterNumber = message:getParameterNumber ()
+  local messageValue = message:getValue ()
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, parameterNumber-messageValue -1)
+  local progNum = parameterMap.get (deviceId, PT_VIRTUAL, parameterNumber-messageValue ) + messageValue - 2
+  parameterMap.set (deviceId, PT_VIRTUAL, parameterNumber-messageValue,progNum)
+  midi.sendControlChange(port , channel , 32, bankNum)
+  midi.sendProgramChange(port , channel , progNum)
+  -- request patch 
+  getBufferData(nil,1)
+end
+
+--------------------------- Timer-based program name scanning all programs on all banks ----------------------------------------
+-- State tracking for the patch scanner
+local patchScanState = {
+  bank = 0,           -- current bank (0-4)
+  patch = 0,          -- current program (0-99)
+  isRunning = false   -- scanner active flag
+}
+
+-- Start the patch scanner (sends 5 requests per second)
+function startPatchScanner(valueObject,value)
+  if value == 0 then return end
+  if patchScanState.isRunning then
+    print("Program scanner already running")
+    return
+  end
+  patchScanState.isRunning = true
+  patchScanState.bank = 0
+  patchScanState.patch = 0
+  print("Starting program scanner: 5 banks × 100 patches")
+  timer.enable()
+end
+
+-- function to stop the patch scanner
+local function stopPatchScanner()
+  timer.disable()
+  patchScanState.isRunning = false
+  flushNameBankIfDirty()   -- final save at end of scan
+  print("Program scanner stopped")
+end
+
+local SCAN_HEADER = concat(SYSEX_HEADER,{0x10})
+
+-- Timer callback (called by Electra One runtime)
+function timer.onTick()
+  if not patchScanState.isRunning then return end
+  -- Send the sysex request for current bank/patch
+  local msg = concat(SCAN_HEADER, {patchScanState.bank, patchScanState.patch})
+  midi.sendSysex(port, msg)
+  print(string.format("Requesting Bank %d, Program %03d", patchScanState.bank, patchScanState.patch))
+  -- Advance to next patch
+  patchScanState.patch = patchScanState.patch + 1
+  -- Check if we've reached the end of this bank
+  if patchScanState.patch >= 100 then
+    patchScanState.patch = 0
+    patchScanState.bank = patchScanState.bank + 1
+    -- Check if we've completed all 4 banks
+    if patchScanState.bank > 4 then
+      patchScanState.bank = 0
+      print("Program scanner cycle complete")
+      stopPatchScanner()
+      parameterMap.set(deviceId, PT_VIRTUAL, 10024, 0)
+    end
+  end
+end
+
+----------------------------- midi receive processing functions ----------------------------------------
+function midi.onSysex(midiInput, sysexBlock)
+  local function is3rdWave()
+    return sysexBlock:peek(1) == 0xF0 and sysexBlock:peek(2) == 0x00
+       and sysexBlock:peek(3) == 0x02 and sysexBlock:peek(4) == 0x4A
+       and sysexBlock:peek(5) == MODEL_BYTE
+  end
+  if not is3rdWave() then return end
+  
+  -- cmd number: 0x02 for program data, 0x03 for edit buffer data, 0x11 for program name
+  local cmd = sysexBlock:peek(6)
+  local len = sysexBlock:getLength()
+  print("3rd Wave sysex message received on interface= " .. midiInput.interface..", cmd=0x"..string.format("%02X",cmd).." len="..len)
+
+  -- program data from edit buffer received (no bank or patch number)
+  if cmd == 0x03 then 
+    print("patch from edit buffer received")
+    for i = 1,len-1 do
+      sysExPatch[i]=sysexBlock:peek(i+6)
+    end
+    assignParam()
+
+  -- program name 
+  elseif cmd == 0x11 then 
+    local bankNum = sysexBlock:peek(7)
+    local progNum = sysexBlock:peek(8)
+    print("bank ".. math.floor(bankNum).."  program " ..math.floor(progNum).." received")
+    local rawName = ""
+    for i = 1,32 do
+      rawName = rawName .. string.char(sysexBlock:peek(8+i))
+    end
+    nameBank[bankNum][progNum] = cleanPatchName(rawName)
+    markNameBankDirty()
+
+  end
+end
+
+function midi.onControlChange(midiInput, ch, controllerNumber, value)
+  if controllerNumber == 32 then
+    parameterMap.set(deviceId, PT_VIRTUAL, BANK_NUM_PARAM, value)
+  elseif controllerNumber == 99 then
+    msbNum = value
+  elseif controllerNumber == 98 then
+    lsbNum = value
+  elseif controllerNumber == 6 then
+    local nrpn = 128*msbNum + lsbNum
+    parameterMap.set(deviceId, PT_VIRTUAL, nrpn, value)
+    -- assign new midi channel to device if channel changed on Peak
+--    if nrpn == 8207 then 
+--      midiChannel = value+1 
+--      assignChannel(nil,1) 
+--      print("New MIDI Channel assigned by Peak: "..math.floor(midiChannel))
+--    end
+  end
+end
+
+function midi.onProgramChange(midiInput, channel, progNum)
+  parameterMap.set(deviceId, PT_VIRTUAL, PROG_NUM_PARAM, progNum) -- updates patch number parameter if change patch on the Peak
+  getPatch(nil,1)
+end
+
+----------------- parameter change callback function ---------------------------
+function parameterMap.onChange(valueObjects, origin, midiValue)
+  if (origin ~= INTERNAL) then return end
+  local msg = valueObjects[1]:getMessage()
+  local pNum = msg:getParameterNumber()
+  local ctlId = valueObjects[1]:getControl():getId()
+-- send nrpn messages 
+  if msg:getType() == PT_VIRTUAL and pNum < 8000 then
+    sendSimpleNRPN(pNum, midiValue, channel)
+  end
+end

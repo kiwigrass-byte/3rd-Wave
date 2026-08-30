@@ -69,7 +69,7 @@ end
 --   recall(table)
 -- We persist a tagged flat map and rebuild nameBank on load.
 
--- a tag to keep track of versions of patch-banks on the Peak 
+-- a tag to keep track of versions of patch-banks on the 3rd Wave 
 local PERSIST_TAG = "3rdWaveProgNamesV1"
 
 local function makePatchKey(bank, patch)

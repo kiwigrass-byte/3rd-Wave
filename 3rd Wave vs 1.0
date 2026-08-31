@@ -2,41 +2,66 @@
 -- September 2026
 -- by @kiwigrass
 
+-------------------------------- Declare Global Constants -----------------------------
 -- 3rd wave model id number: 0x01 for 24 voice products, 0x02 for 8 voice
 local MODEL_BYTE = 0x02
 
+-- header for 3rd Wave sysEx messages (will recognize either model id byte)
+local SYSEX_HEADER = {0x00,0x02,0x4A,0x02}
+
+-- virtual parameter numbers
+local BANK_NUMBER = 10032
+local PROG_NUMBER = 10033
+local SELECT_MINUS = 10034
+local SELECT_IT = 10035
+local SELECT_PLUS = 10036
+local PART_NUMBER = 10029
+
+-- control ids
+local CTRL_PROG_NUMBER = 3
+
+-----------------  Device information -----------------------------
 local currentDevice  = devices.get(1)
 local deviceId = currentDevice:getId()
 local channel = currentDevice:getChannel ()
 local port      = currentDevice:getPort ()
 
+devices.create(2, "Part 1", port, 1)
+devices.create(3, "Part 2", port, 2)
+local part1Channel = devices.get(2):getChannel ()
+local part2Channel = devices.get(3):getChannel()
+
+-- events to track
+events.subscribe(PAGES | POTS)
+
+
+------------------------- initialize global variables
+-- UB-Xa-reported channels (source of truth when available)
+local wavePart1Ch = nil
+local wavePart2Ch = nil
+local channelsFromSynth = true
+
 -- populate the bottom RH screen information display on load
 local authorDate = "kiwigrass 2026" 
 info.setText(authorDate)
-
--- header for 3rd Wave sysEx messages (will recognize either model id byte)
-local SYSEX_HEADER = {0x00,0x02,0x4A,0x02}
 
 -- Tracks how many ticks have passed for the timer.onTick function
 local amountTicks = 0 
 -- Set timer tick rate (e.g., every 200 milliseconds) 
 timer.setPeriod(100) 
 
--- events to track
-events.subscribe(PAGES | POTS)
-
--- control reference numbers
-PROG_NUM_CTRL = 3
-
--- parameter numbers
-PROG_NUM_PARAM = 10033
-BANK_NUM_PARAM = 10032
+-- number of wavetables by type 
+local ppgNumber = 0
+local userNumber = 0
+local analogNumber = 0
+local sampleNumber = 0
 
 -- 3rd Wave-reported channel (source of truth when available)
 local midiChannel = nil
 
 -- assign MIDI channel based on Peak
 function assignChannel(valueObject, value)
+  if midiChannel == nil then return end
   device:setChannel(midiChannel)
   channel = device:getChannel()
   deviceId = device:getId()
@@ -63,7 +88,7 @@ for y = 0,4 do
     end
 end
 
--- ---------- Persistence helpers for patch-name cache ----------
+------------- Persistence helpers for patch-name cache ----------
 -- Electra One runtime in this preset:
 --   persist(table)
 --   recall(table)
@@ -162,7 +187,54 @@ end
 
 function preset.onLoad()
   loadNameBank()  -- restore cached patch names first
+  getWaveCount(nil,1) -- number of wave tables
   pages.display(1)
+end
+
+
+-- format master output Pan
+function pan(valueObject,value)
+  local control = valueObject:getControl():getId()
+  local side =" L"
+  if (value < 0 ) then 
+    controls.get(control):setColor (BLUE)
+  elseif (value == 0) then
+    side = " Center"
+    controls.get(control):setColor (WHITE)
+  elseif (value > 0) then
+    side = " R"
+    controls.get(control):setColor (RED)
+  end
+  return(string.format ("%.0f%%",100*(math.abs(math.floor(value)))/64) .. side)
+end
+
+function percent (valueObject, value)
+    return (string.format ("%.1f%%", value/1.27))
+end
+
+local DESTINATION = {[0]="Destination off","osc 1 freq","osc 2 freq","osc 3 freq","osc all freq","osc 1 level","osc 2 level", "osc 3 level","osc all level", "osc 1 wave env","osc 2 wave env","osc 3 wave env","osc all wave env",
+    "osc 1 FM amount", "osc2 FM amount","osc3 FM amount", "osc all FM amount", "osc 1 drift", "osc 2 drift", "osc 3 drift", "osc all drift", "osc 1 PW", "osc 2 PW", "osc 3 PW", "osc all PW", "LPF drive", "LPF cutoff", 
+    "LPF resonance", "not used", "SVF cutoff","SVF resonance", "SVF mode", "LFO 1 freq", "LFO 2 freq", "LFO 3 freq", "LFO 4 freq", "LFO all freq", "LFO 1 amount", "LFO 2 amount", "LFO 3 amount", "LFO 4 amount", "LFO all amount", 
+    "LPF env amount", "amp env amount","env 3 amount", "env 4 amount", "SVF env amount", "wave env amount", "all env amount", "f-env attack", "a-env attack", "env 3 attack", "env 4 attack", "env all attack", "f-env decay",
+    "a-env decay", "env 3 decay", "env 4 decay", "env all decay", "f-env sustain", "a-env sustain", "env 3 sustain", "env 4 sustain", "env all sustain", "f-env release", "a-env release", "env 3 release", "env 4 release",
+    "env all release", "w-env o1/t1", "w-env o2/t1", "w-env o3/t1", "w-env o1/t2", "w-env o2/t2", "w-env o3/t2", "w-env o1/t3", "w-env o2/t3", "w-env o3/t3", "w-env o1/t4", "w-env o2/t4", "w-env o3/t4", "w-env o1/t5", "w-env o5/t5",
+    "w-env o3/t5", "w-env o1/t6", "w-env o2/t6", "w-env o3/t6", "w-env o1/p1", "w-env o2/p1", "w-env o3/p1", "w-env o1/p2", "w-env o2/p2", "w-env o3/p2", "w-env o1/p3", "w-env o2/p3", "w-env o3/p3", "w-env o1/p4", "w-env o2/p4",
+    "w-env o3/p4", "w-env o1/p5", "w-env o2/p5", "w-env o3/p5", "w-env o1/p6", "w-env o2/p6", "w-env o3/p6", "pan spread", "effect 1 mix", "effect 1 par 1", "effect 1 par 2", "effect 1 par 3", "effect 2 mix", "effect 2 par 1", 
+    "effect 2 par 2", "effect 2 par 3", "osc 1 fine", "osc 2 fine", "osc 3 fine", "osc all fine", "mod 1 amount", "mod 2 amount", "mod 3 amount", "mod 4 amount", "mod 5 amount", "mod 6 amount", "mod 7 amount", "mod 8 amount", "smpl start time",
+}
+
+function destination(valueObject,value)
+  local control = valueObject:getControl():getId()
+    controls.get(control):setName (DESTINATION[value])
+end
+
+local SOURCE = {[0]="Source off","osc 1","osc 2","osc 3","filter envelope","amp envelope","LFO 1", "LFO 2","LFO 3", "LFO 4","envelope 3","envelope 4","osc1 wave env", "osc 2 wave env", "osc 3 wave env", "PB wheel", "Mod wheel",
+    "velocity", "pressure", "foot pedal", "midi expression", "note number", "random", "DC", "noise", "audio out", "audio in", "MPE PB", "MPE Y axis", "midi breath ctrl",
+}
+
+function source(valueObject,value)
+  local control = valueObject:getControl():getId()
+    controls.get(control):setName (SOURCE[value])
 end
 
 -- helper function to get a specific bit series from a value
@@ -189,10 +261,27 @@ end
 
 function displayProg (valueObject, value)
   local bankTxt={"A","B","C","D"} -- abbreviations of the bank names
-  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUM_PARAM) + 1
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER) + 1
   local progName = nameBank[bankNum][value]
-  local c = safeGet(PROG_NUM_CTRL); if c then c:setName(progName) end
+  local c = safeGet(CTRL_PROG_NUMBER); if c then c:setName(progName) end
   return (bankTxt[bankNum].." "..string.format("%02d",value))
+end
+
+-- ── ADSR value-in-name suffix ───────────────────────────────────────────────
+-- Appends the live value of an ADSR envelope's primary stage to its tile
+-- title, e.g. "AMP ATTACK" -> "AMP ATTACK 101". The base (unsuffixed) name is
+-- captured the first time each control is seen so repeat updates don't keep
+-- stacking suffixes onto an already-modified name.
+
+local adsrBaseNames = {}
+
+function adsrValueName(valueObject, value)
+  local ctrl = valueObject:getControl()
+  --if not ctrl then return end
+  local id = ctrl:getId()
+  if not adsrBaseNames[id] then adsrBaseNames[id] = ctrl:getName() end
+  ctrl:setName(adsrBaseNames[id] .. " " .. string.format("%d", value))
+  -- print ("ctl = "..id..", base Name = "..ahdsrBaseNames[id])
 end
 
 ---------- midi request functions ---------------------
@@ -204,16 +293,16 @@ end
 
 -- request data for a 3rd Wave program (including sequencer data)
 function getProgramData(valueObject,value)
-  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUM_PARAM)
-  local progNum = parameterMap.get (deviceId, PT_VIRTUAL, PROG_NUM_PARAM)
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER)
+  local progNum = parameterMap.get (deviceId, PT_VIRTUAL, PROG_NUMBER)
   local message = concat(SYSEX_HEADER,{0x05,bankNum,progNum})
   midi.sendSysex(port,message)
 end
 
 -- request a 3rd Wave program name
 function getProgramName(valueObject,value)
-  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUM_PARAM)
-  local progNum = parameterMap.get (deviceId, PT_VIRTUAL, PROG_NUM_PARAM)
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER)
+  local progNum = parameterMap.get (deviceId, PT_VIRTUAL, PROG_NUMBER)
   local message = concat(SYSEX_HEADER,{0x10,bankNum,progNum})
   midi.sendSysex(port,message)
 end
@@ -224,11 +313,18 @@ function getBufferData(valueObject,value)
   midi.sendSysex(port,message)
 end
 
+-- request number of wavetables by type in the 3rd Wave
+function getWaveCount(valueObject,value)
+  local message = concat(SYSEX_HEADER,{0x07})
+  midi.sendSysex(port,message)
+end
+
 -------- midi send functions ---------------------
-function sendSimpleNRPN(nrpn, value)
-  midi.sendControlChange (port , channel , 99, math.floor(nrpn/128))
-  midi.sendControlChange (port , channel , 98, nrpn%128)
-  midi.sendControlChange (port , channel , 6, value)
+function sendNRPN(ch, nrpn, value)
+  midi.sendControlChange (port , ch , 99, math.floor(nrpn/128))
+  midi.sendControlChange (port , ch , 98, nrpn%128)
+  midi.sendControlChange (port , ch , 6, math.floor(value/128))
+  midi.sendControlChange (port , ch , 38, value%128)
 end
 
 function selectIt(valueObject, value)
@@ -245,7 +341,7 @@ function selectIt(valueObject, value)
   getBufferData(nil,1)
 end
 
---------------------------- Timer-based program name scanning all programs on all banks ----------------------------------------
+--------------------------- Timer-based program name scanning all programs in all banks ----------------------------------------
 -- State tracking for the patch scanner
 local patchScanState = {
   bank = 0,           -- current bank (0-4)
@@ -334,12 +430,19 @@ function midi.onSysex(midiInput, sysexBlock)
     nameBank[bankNum][progNum] = cleanPatchName(rawName)
     markNameBankDirty()
 
+  -- wavetable counts 
+  elseif cmd == 0x04 then 
+    ppgNumber = sysexBlock:peek(7)
+    userNumber = sysexBlock:peek(8)
+    analogNumber = sysexBlock:peek(9)
+    sampleNumber = sysexBlock:peek(10)
+    print(math.floor(ppgNumber).." PPG, " ..math.floor(userNumber).." User, ".. math.floor(analogNumber).." Analog, " ..math.floor(sampleNumber).. " Sample wavetables received")
   end
 end
 
 function midi.onControlChange(midiInput, ch, controllerNumber, value)
   if controllerNumber == 32 then
-    parameterMap.set(deviceId, PT_VIRTUAL, BANK_NUM_PARAM, value)
+    parameterMap.set(deviceId, PT_VIRTUAL, BANK_NUMBER, value)
   elseif controllerNumber == 99 then
     msbNum = value
   elseif controllerNumber == 98 then
@@ -347,18 +450,13 @@ function midi.onControlChange(midiInput, ch, controllerNumber, value)
   elseif controllerNumber == 6 then
     local nrpn = 128*msbNum + lsbNum
     parameterMap.set(deviceId, PT_VIRTUAL, nrpn, value)
-    -- assign new midi channel to device if channel changed on Peak
---    if nrpn == 8207 then 
---      midiChannel = value+1 
---      assignChannel(nil,1) 
---      print("New MIDI Channel assigned by Peak: "..math.floor(midiChannel))
---    end
   end
 end
 
 function midi.onProgramChange(midiInput, channel, progNum)
-  parameterMap.set(deviceId, PT_VIRTUAL, PROG_NUM_PARAM, progNum) -- updates patch number parameter if change patch on the Peak
-  getPatch(nil,1)
+  -- updates patch number parameter if change patch on the 3rd Wave
+  parameterMap.set(deviceId, PT_VIRTUAL, PROG_NUMBER, progNum) 
+  getBufferData(nil,1)
 end
 
 ----------------- parameter change callback function ---------------------------
@@ -367,8 +465,18 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   local msg = valueObjects[1]:getMessage()
   local pNum = msg:getParameterNumber()
   local ctlId = valueObjects[1]:getControl():getId()
--- send nrpn messages 
-  if msg:getType() == PT_VIRTUAL and pNum < 8000 then
-    sendSimpleNRPN(pNum, midiValue, channel)
+  local ch = part1Channel
+  -- send nrpn messages for part 1 and part 2 parameters 
+  if msg:getType() == PT_VIRTUAL and pNum < 1024 then
+    local partNum = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER)
+    if partNum == 2 then 
+      -- use part 2 midi channel
+      ch = part2Channel
+      -- reuse part 1 unison parameters for part 2 which are offset by +1
+      if pNum == 397 or pNum == 401 or pNum == 405 or pNum == 409 then pNum = pNum + 1  end
+      -- offset all part 2 parameters by 1000
+      pNum = pNum + 1000
+    end
+    midi.sendNrpn(port, ch, pNum, midiValue) 
   end
 end

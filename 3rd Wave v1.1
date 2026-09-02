@@ -16,6 +16,7 @@ local SELECT_MINUS = 10034
 local SELECT_IT = 10035
 local SELECT_PLUS = 10036
 local PART_NUMBER = 10029
+local COMPARE_IT = 10039
 
 -- control ids
 local CTRL_PROG_NUMBER = 3
@@ -34,6 +35,11 @@ local part2Channel = devices.get(3):getChannel()
 -- events to track
 events.subscribe(PAGES | POTS)
 
+
+-- Caches (key = parNum, value = 14-bit value)
+local singleCache = {}
+local part1Cache  = {}
+local part2Cache  = {}
 
 ------------------------- initialize global variables
 -- UB-Xa-reported channels (source of truth when available)
@@ -522,68 +528,102 @@ function timer.onTick()
   end
 end
 
--- sysExPatch will contain ONLY relevant bytes, re-based to index 1
-local function loadRelevantPatchBytes(sysexBlock, firstByte, lastByte)
-  local out = {}
-  local k = 1
-  for i = firstByte, lastByte do
-    out[k] = sysexBlock:peek(i)
-    k = k + 1
-  end
-  return out
-end
-
-local function extractPatchName(sysexBlock)
-  local chars = {}
-
-  for i = 9, 136, 4 do
-    local pMsb = sysexBlock:peek(i)       -- expected 0
-    local pLsb = sysexBlock:peek(i + 1)   -- expected 1..32
-    local vMsb = sysexBlock:peek(i + 2)   -- expected 0
-    local vLsb = sysexBlock:peek(i + 3)   -- ASCII char
-
-    -- keep lints quiet in some runtimes
-    local _ = pMsb + pLsb + vMsb
-    if _ == -1 then print("") end
-
-    if vLsb == 0x00 then
-      break
-    end
-    chars[#chars + 1] = string.char(vLsb)
-  end
-
-  local patchName = table.concat(chars)
-  patchName = patchName:gsub("%s+$", "")
-  return patchName
-end
-
-local function loadRelevantPatchBytes(sysexBlock, firstByte, lastByte)
-  local out = {}
-  local k = 1
-  for i = firstByte, lastByte do
-    out[k] = sysexBlock:peek(i)
-    k = k + 1
-  end
-  return out
-end
-
-local function applyNrpnPackedPayload(payload, targetParType)
+-- Decode one NRPN block directly into existing virtual params
+local function applyNrpnBlockFromSysex(sysexBlock, startByte, endByte, targetParType)
   targetParType = targetParType or PT_VIRTUAL
-  local n = #payload
-  local tupleCount = math.floor(n / 4)
+  local tupleCount = math.floor((endByte - startByte + 1) / 4)
 
   for t = 0, tupleCount - 1 do
-    local i = 1 + t * 4
-    local pMsb = payload[i] or 0
-    local pLsb = payload[i + 1] or 0
-    local vMsb = payload[i + 2] or 0
-    local vLsb = payload[i + 3] or 0
+    local i = startByte + t * 4
+    local pMsb = sysexBlock:peek(i) or 0
+    local pLsb = sysexBlock:peek(i + 1) or 0
+    local vMsb = sysexBlock:peek(i + 2) or 0
+    local vLsb = sysexBlock:peek(i + 3) or 0
 
     local parNum = pMsb * 128 + pLsb
     local value  = vMsb * 128 + vLsb
-
     parameterMap.set(deviceId, targetParType, parNum, value)
   end
+end
+
+-- extract patch names from first 32 parameters
+local function extractPatchName(sysexBlock)
+  local chars = {}
+  for i = 9, 136, 4 do
+    local vLsb = sysexBlock:peek(i + 3) or 0
+    if vLsb == 0 then break end
+    chars[#chars + 1] = string.char(vLsb)
+  end
+  return table.concat(chars):gsub("%s+$", "")
+end
+
+-- helper to identify parameter and value MSB/LSB from sysEx bytes
+local function decodeNrpnBlockToCache(sysexBlock, startByte, endByte, cache)
+  local tupleCount = math.floor((endByte - startByte + 1) / 4)
+  for t = 0, tupleCount - 1 do
+    local i = startByte + t * 4
+    local pMsb = sysexBlock:peek(i) or 0
+    local pLsb = sysexBlock:peek(i + 1) or 0
+    local vMsb = sysexBlock:peek(i + 2) or 0
+    local vLsb = sysexBlock:peek(i + 3) or 0
+    local parNum = pMsb * 128 + pLsb
+    local value  = vMsb * 128 + vLsb
+    cache[parNum] = value
+  end
+end
+
+-- helper to apply cached parameter values from sysEx dump to virtual parameters 
+local function applyCacheToParams(cache, targetParType)
+  targetParType = targetParType or PT_VIRTUAL
+  for parNum, value in pairs(cache) do
+    parameterMap.set(deviceId, targetParType, parNum, value)
+  end
+end
+
+-- helper to apply cache to current part view 
+local function applyCurrentViewFromCaches()
+  -- always apply single params
+  applyCacheToParams(singleCache, PT_VIRTUAL)
+  -- then selected part overlay
+  local partSel = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER) or 1
+  if partSel == 1 then
+    applyCacheToParams(part1Cache, PT_VIRTUAL)
+  elseif partSel == 2 then
+    applyCacheToParams(part2Cache, PT_VIRTUAL)
+  end
+end
+
+-- helper for summarizeCache (cache validation)
+local function sortedKeys(t)
+  local keys = {}
+  for k, _ in pairs(t) do keys[#keys+1] = k end
+  table.sort(keys)
+  return keys
+end
+
+-- helper for cache validation
+local function summarizeCache(name, cache)
+  local keys = sortedKeys(cache)
+  local n = #keys
+  if n == 0 then
+    print(name .. ": empty")
+    return
+  end
+
+  local firstK, lastK = keys[1], keys[n]
+  local firstV, lastV = cache[firstK], cache[lastK]
+
+  print(string.format(
+    "%s: count=%d first=(p%d v%d) last=(p%d v%d)",
+    name, n, firstK, firstV, lastK, lastV
+  ))
+end
+
+-- helper to apply cache validation to each block
+local function validateCaches()
+  summarizeCache("singleCache", singleCache)
+  summarizeCache("part1Cache",  part1Cache)
+  summarizeCache("part2Cache",  part2Cache)
 end
 
 -- helper function to remove empty spaces from patch names before they are stored
@@ -614,19 +654,29 @@ function midi.onSysex(midiInput, sysexBlock)
     local progNum = sysexBlock:peek(8) 
     print("Program data for bank ".. math.floor(bankNum)..", program " ..math.floor(progNum).." received")
 
+    -- display name of loaded patch
     local patchName = extractPatchName(sysexBlock)
-    print(patchName)
     if patchName ~= "" then
-      info.setText(string.sub(patchName, 1, 20)) -- info bar max is 20 chars
+      info.setText(string.sub(patchName, 1, 20))
     end
 
-    -- keep only relevant payload bytes
-    sysExPatch = loadRelevantPatchBytes(sysexBlock, 137, 1772)
+    -- clear old caches for new dump
+    singleCache = {}
+    part1Cache  = {}
+    part2Cache  = {}
 
-    -- main parameter payload
-    -- decode tuples: [paramMSB,paramLSB,valueMSB,valueLSB]...
-    applyNrpnPackedPayload(sysExPatch, PT_VIRTUAL)
-    getProgramName(nil,1)
+    -- single (excluding name bytes 9..136)
+    decodeNrpnBlockToCache(sysexBlock, 137, 672, singleCache)
+    decodeNrpnBlockToCache(sysexBlock, 1773, 1788, singleCache)
+
+    -- part blocks
+    decodeNrpnBlockToCache(sysexBlock, 673, 1772, part1Cache)
+    decodeNrpnBlockToCache(sysexBlock, 1789, 2888, part2Cache)
+
+    -- check caches are vaild
+    validateCaches()
+    -- paint according to selected part
+    applyCurrentViewFromCaches()
 
   -- edit buffer data received
   elseif cmd == 0x03 then
@@ -678,22 +728,60 @@ function midi.onProgramChange(midiInput, channel, progNum)
   getBufferData(nil,1)
 end
 
+-- guard to prevent sendNRPN while we're repainting from cache
+local isApplyingCache = false
+
+local function applyCacheToParams(cache, targetParType)
+  targetParType = targetParType or PT_VIRTUAL
+  for parNum, value in pairs(cache) do
+    parameterMap.set(deviceId, targetParType, parNum, value)
+  end
+end
+
+local function applyCurrentViewFromCaches()
+  if isApplyingCache then return end
+  isApplyingCache = true
+
+  -- always apply single params
+  applyCacheToParams(singleCache, PT_VIRTUAL)
+
+  -- overlay currently selected part
+  local partSel = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER) or 1
+  if partSel == 1 then
+    applyCacheToParams(part1Cache, PT_VIRTUAL)
+  elseif partSel == 2 then
+    applyCacheToParams(part2Cache, PT_VIRTUAL)
+  end
+
+  isApplyingCache = false
+end
+
 ----------------- parameter change callback function ---------------------------
 function parameterMap.onChange(valueObjects, origin, midiValue)
   if (origin ~= INTERNAL) then return end
+
   local msg = valueObjects[1]:getMessage()
   local pNum = msg:getParameterNumber()
+
+  -- if user switched displayed part, repaint UI from cached dump, no MIDI out
+  if msg:getType() == PT_VIRTUAL and pNum == PART_NUMBER then
+    applyCurrentViewFromCaches()
+    return
+  end
+
+  -- block outbound NRPN while cache-apply is writing parameterMap
+  if isApplyingCache then return end
+
   local ctlId = valueObjects[1]:getControl():getId()
   local ch = part1Channel
-  -- send nrpn messages for part 1 and part 2 parameters 
+
   if msg:getType() == PT_VIRTUAL and pNum < 1024 then
     local partNum = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER)
-    if partNum == 2 then 
-      -- use part 2 midi channel
+    if partNum == 2 then
       ch = part2Channel
-      -- reuse part 1 unison parameters for part 2 which are offset by +1
-      if pNum == 397 or pNum == 401 or pNum == 405 or pNum == 409 or pNUm == 429 or pNum == 435 then pNum = pNum + 1  end
-      -- offset all part 2 parameters by 1000
+      if pNum == 397 or pNum == 401 or pNum == 405 or pNum == 409 or pNum == 429 or pNum == 435 then
+        pNum = pNum + 1
+      end
       pNum = pNum + 1000
     end
     sendNRPN(ch, pNum, midiValue)

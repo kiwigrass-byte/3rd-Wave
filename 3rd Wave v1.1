@@ -1,0 +1,669 @@
+-- Preset for Groove Synth 3rd Wave 8M
+-- September 2026
+-- by @kiwigrass
+
+-------------------------------- Declare Global Constants -----------------------------
+-- 3rd wave model id number: 0x01 for 24 voice products, 0x02 for 8 voice
+local MODEL_BYTE = 0x02
+
+-- header for 3rd Wave sysEx messages (will recognize either model id byte)
+local SYSEX_HEADER = {0x00,0x02,0x4A,0x02}
+
+-- virtual parameter numbers
+local BANK_NUMBER = 10032
+local PROG_NUMBER = 10033
+local SELECT_MINUS = 10034
+local SELECT_IT = 10035
+local SELECT_PLUS = 10036
+local PART_NUMBER = 10029
+
+-- control ids
+local CTRL_PROG_NUMBER = 3
+
+-----------------  Device information -----------------------------
+local currentDevice  = devices.get(1)
+local deviceId = currentDevice:getId()
+local channel = currentDevice:getChannel ()
+local port      = currentDevice:getPort ()
+
+devices.create(2, "Part 1", port, 1)
+devices.create(3, "Part 2", port, 2)
+local part1Channel = devices.get(2):getChannel ()
+local part2Channel = devices.get(3):getChannel()
+
+-- events to track
+events.subscribe(PAGES | POTS)
+
+
+------------------------- initialize global variables
+-- UB-Xa-reported channels (source of truth when available)
+local wavePart1Ch = nil
+local wavePart2Ch = nil
+local channelsFromSynth = true
+
+-- populate the bottom RH screen information display on load
+local authorDate = "kiwigrass 2026" 
+info.setText(authorDate)
+
+-- Tracks how many ticks have passed for the timer.onTick function
+local amountTicks = 0 
+-- Set timer tick rate (e.g., every 200 milliseconds) 
+timer.setPeriod(250) 
+
+-- number of wavetables by type 
+local ppgNumber = 0
+local userNumber = 0
+local analogNumber = 0
+local sampleNumber = 0
+
+-- 3rd Wave-reported channel (source of truth when available)
+local midiChannel = nil
+
+-- assign MIDI channel based on Peak
+function assignChannel(valueObject, value)
+  if midiChannel == nil then return end
+  device:setChannel(midiChannel)
+  channel = device:getChannel()
+  deviceId = device:getId()
+  port = device:getPort()
+end
+
+-- initialize program sysEx data
+local sysExBuffer = {}
+
+local sysExPatch = {}   -- sysExPatch[byte] – store patch data
+
+-- NRPN reassembly registers
+local msbNum = 0
+local lsbNum = 0
+
+-- to store 100 program names in 5 banks
+local nameBank = {}   
+-- 1 = bank A, 2= bank B, 3 = bank C, 4 = bank D, 5 = bank E 
+for y = 1,5 do        
+    nameBank[y] = {}
+    -- program numbers 1..100
+    for z = 1,100 do  
+        nameBank[y][z] = ""
+    end
+end
+
+-- helper to make sure bad control id numbers are not called
+local function safeGet(id)
+  local ok, c = pcall(controls.get, id)
+  return ok and c or nil
+end
+
+------------- Persistence helpers for patch-name cache ----------
+-- Electra One runtime in this preset:
+--   persist(table)
+--   recall(table)
+-- We persist a tagged flat map and rebuild nameBank on load.
+
+-- a tag to keep track of versions of patch-banks on the 3rd Wave 
+local PERSIST_TAG = "3rdWaveProgNamesV1"
+
+local function makePatchKey(bank, patch)
+  return string.format("b%d_p%03d", bank, patch) -- bank 0..4, patch 0..99
+end
+
+local function flattenNameBank(src)
+  local flat = {}
+  local count = 0
+  for b = 1, 5 do
+    for p = 1, 100 do
+      local v = src[b] and src[b][p] or ""
+      v = tostring(v or "")
+      flat[makePatchKey(b, p)] = v
+      if v ~= "" then count = count + 1 end
+    end
+  end
+  return flat, count
+end
+
+local function inflateNameBank(flat)
+  local dst = {}
+  local count = 0
+  for b = 1, 5 do
+    dst[b] = {}
+    for p = 1, 100 do
+      local v = (flat and flat[makePatchKey(b, p)]) or ""
+      dst[b][p] = v
+      if v ~= "" then count = count + 1 end
+    end
+  end
+  return dst, count
+end
+
+local function saveNameBank()
+  local flat, count = flattenNameBank(nameBank)
+  local payload = {
+    _tag = PERSIST_TAG,
+    names = flat
+  }
+  local ok, err = pcall(persist, payload)
+  if ok then
+    print(string.format("nameBank persisted (%d non-empty names)", count))
+  else
+    print("nameBank persist failed: " .. tostring(err))
+  end
+end
+
+local function loadNameBank()
+  local payload = {}
+  local ok, err = pcall(recall, payload) -- recall(destinationTable)
+  if not ok then
+    print("nameBank recall failed: " .. tostring(err))
+    return
+  end
+  if payload._tag ~= PERSIST_TAG then
+    print("nameBank recall: no matching persisted payload tag")
+    return
+  end
+  if type(payload.names) ~= "table" then
+    print("nameBank recall: payload.names missing/invalid")
+    return
+  end
+  local rebuilt, count = inflateNameBank(payload.names)
+  nameBank = rebuilt
+  print(string.format("nameBank restored (%d non-empty names)", count))
+end
+
+-- Debounced/controlled persistence during large scans
+local nameBankDirty = false
+local nameBankUpdates = 0
+local SAVE_EVERY_N_UPDATES = 50 -- tune if desired
+
+local function markNameBankDirty()
+  nameBankDirty = true
+  nameBankUpdates = nameBankUpdates + 1
+  -- periodic checkpoint save during long scans
+  if (nameBankUpdates % SAVE_EVERY_N_UPDATES) == 0 then
+    saveNameBank()
+    nameBankDirty = false
+  end
+end
+
+local function flushNameBankIfDirty()
+  if nameBankDirty then
+    saveNameBank()
+    nameBankDirty = false
+  end
+end
+
+function preset.onLoad()
+  loadNameBank()  -- restore cached patch names first
+  pages.display(1)
+end
+
+function preset.onReady()
+  getWaveCount(nil,1) -- number of wave tables
+end
+
+-- format master output Pan
+function pan(valueObject,value)
+  local control = valueObject:getControl():getId()
+  local side =" L"
+  if (value < 0 ) then 
+    controls.get(control):setColor (BLUE)
+  elseif (value == 0) then
+    side = " Center"
+    controls.get(control):setColor (WHITE)
+  elseif (value > 0) then
+    side = " R"
+    controls.get(control):setColor (RED)
+  end
+  return(value)
+end
+
+local ANALOG_NAMES = {[0]="Sawtooth","Square","Triangle","Sine","Super Saw","Pink Noise","Blue Noise",}
+
+local CTRL_ANALOG = {369}
+function showAnalogName( valueObject, value)
+--  print("value: "..value)
+  if value == nil then return end
+  local c = safeGet(CTRL_ANALOG[1]); if c then c:setName(ANALOG_NAMES[value]) end
+end
+
+function analog( valueObject, value)
+  if value < 0 then return end
+  local c = safeGet(CTRL_ANALOG[1]); if c then c:setName(ANALOG_NAMES[value]) end
+  return (string.format ("A%02d", value))
+end
+
+function ppg( valueObject, value)
+    return (string.format ("P%02d", value))
+end
+
+function user( valueObject, value)
+    return (string.format ("U%02d", value))
+end
+
+function sample( valueObject, value)
+    return (string.format ("S%02d", value))
+end
+
+function waveMaker( valueObject, value)
+    return (string.format ("S%02d", value))
+end
+
+function percent (valueObject, value)
+    return (string.format ("%.1f%%", value/1.27))
+end
+
+function zeroOne (valueObject, value)
+    return (string.format ("%.2f", value/127))
+end
+
+function gain (valueObject, value)
+    return (string.format ("%.0f", (value/1.27)))
+end
+
+function displayBpm(valueObject,value)
+   return(math.floor(value) .. " bpm")
+end
+
+local CTRL_PPG = {368,379,384}
+local CTRL_USER = {370,380,385}
+local CTRL_ANALOG = {369,381,386}
+local CTRL_SAMPLE = {49,382,387}
+local CTRL_WM = {377,383,388}
+local TARGET_OSC_SLOT={4,16,28}
+local CTRL_PULSE = {27,28,29}
+local CTRL_OFFSET = {30,31,32}
+local TARGET_MOD_SLOT={5,17,29}
+local OSC_PAGE = 2
+
+-- show PW or Wave Offset depending on value of Wavetable parameter
+function swapModType1(valueObject, value)
+local rawValue = 0
+-- offset analog wave form control index to match NRPN value
+--if value > 56 and value < 64 then rawValue = (value -56) + 256 end
+--  print("value: "..value)
+  if value >= 256 and value < 263 then
+    controls.get(CTRL_PULSE[1]):setSlot(TARGET_MOD_SLOT[1], OSC_PAGE) 
+    local c = safeGet(CTRL_ANALOG[1]); if c then c:setName(ANALOG_NAMES[value-256]) end
+
+  else
+    controls.get(CTRL_OFFSET[1]):setSlot(TARGET_MOD_SLOT[1], OSC_PAGE)
+  end
+end
+
+-- show Wavetable control depending on value of waveform-type selector virtual parameter
+function swapOscType1(valueObject, value)
+-- select PPG waveforms
+  if value == 0 then
+    controls.get(CTRL_PPG[1]):setSlot(TARGET_OSC_SLOT[1], OSC_PAGE) 
+  elseif value == 1 then
+    controls.get(CTRL_USER[1]):setSlot(TARGET_OSC_SLOT[1], OSC_PAGE)
+  elseif value == 2 then
+    controls.get(CTRL_ANALOG[1]):setSlot(TARGET_OSC_SLOT[1], OSC_PAGE)
+  elseif value == 3 then
+    controls.get(CTRL_SAMPLE[1]):setSlot(TARGET_OSC_SLOT[1], OSC_PAGE)
+  elseif value == 4 then
+    controls.get(CTRL_WM[1]):setSlot(TARGET_OSC_SLOT[1], OSC_PAGE)
+  end
+end
+
+
+local WAVE_TYPE_PARAM = 10037
+
+function selectWavetable(valueObject, value)
+  local waveType = parameterMap.get(deviceId, PT_VIRTUAL, WAVE_TYPE_PARAM)
+  local nrpnValue
+  
+  if waveType == 0 then nrpnValue = value  -- P (0-35)
+  elseif waveType == 1 then nrpnValue = 128 + value  -- U (128-183)
+  elseif waveType == 2 then nrpnValue = 256 + value  -- A (256-262)
+  elseif waveType == 3 then nrpnValue = 384  -- W
+  elseif waveType == 4 then nrpnValue = 512 + value  -- S (512-522)
+  end
+  
+  parameterMap.set(deviceId, PT_VIRTUAL, 102, nrpnValue)
+end
+
+local WAVE_TABLE = {[0]="P00","P01","P02","P03","P04","osc 1 level","osc 2 level", "osc 3 level","osc all level", "osc 1 wave env","osc 2 wave env","osc 3 wave env","osc all wave env",
+    "osc 1 FM amount", "osc2 FM amount","osc3 FM amount", "osc all FM amount", "osc 1 drift", "osc 2 drift", "osc 3 drift", "osc all drift", "osc 1 PW", "osc 2 PW", "osc 3 PW", "osc all PW", "LPF drive", "LPF cutoff", 
+    "LPF resonance", "not used", "SVF cutoff","SVF resonance", "SVF mode", "LFO 1 freq", "LFO 2 freq", "LFO 3 freq", "LFO 4 freq", "LFO all freq", "LFO 1 amount", "LFO 2 amount", "LFO 3 amount", "LFO 4 amount", "LFO all amount", 
+    "LPF env amount", "amp env amount","env 3 amount", "env 4 amount", "SVF env amount", "wave env amount", "all env amount", "f-env attack", "a-env attack", "env 3 attack", "env 4 attack", "env all attack", "f-env decay",
+    "a-env decay", "env 3 decay", "env 4 decay", "env all decay", "f-env sustain", "a-env sustain", "env 3 sustain", "env 4 sustain", "env all sustain", "f-env release", "a-env release", "env 3 release", "env 4 release",
+    "env all release", "w-env o1/t1", "w-env o2/t1", "w-env o3/t1", "w-env o1/t2", "w-env o2/t2", "w-env o3/t2", "w-env o1/t3", "w-env o2/t3", "w-env o3/t3", "w-env o1/t4", "w-env o2/t4", "w-env o3/t4", "w-env o1/t5", "w-env o5/t5",
+    "w-env o3/t5", "w-env o1/t6", "w-env o2/t6", "w-env o3/t6", "w-env o1/p1", "w-env o2/p1", "w-env o3/p1", "w-env o1/p2", "w-env o2/p2", "w-env o3/p2", "w-env o1/p3", "w-env o2/p3", "w-env o3/p3", "w-env o1/p4", "w-env o2/p4",
+    "w-env o3/p4", "w-env o1/p5", "w-env o2/p5", "w-env o3/p5", "w-env o1/p6", "w-env o2/p6", "w-env o3/p6", "pan spread", "effect 1 mix", "effect 1 par 1", "effect 1 par 2", "effect 1 par 3", "effect 2 mix", "effect 2 par 1", 
+    "effect 2 par 2", "effect 2 par 3", "osc 1 fine", "osc 2 fine", "osc 3 fine", "osc all fine", "mod 1 amount", "mod 2 amount", "mod 3 amount", "mod 4 amount", "mod 5 amount", "mod 6 amount", "mod 7 amount", "mod 8 amount", "smpl start time",
+}
+
+function waveTable(valueObject,value)
+  local control = valueObject:getControl():getId()
+    controls.get(control):setName (DESTINATION[value])
+end
+
+local DESTINATION = {[0]="Destination off","osc 1 freq","osc 2 freq","osc 3 freq","osc all freq","osc 1 level","osc 2 level", "osc 3 level","osc all level", "osc 1 wave env","osc 2 wave env","osc 3 wave env","osc all wave env",
+    "osc 1 FM amount", "osc2 FM amount","osc3 FM amount", "osc all FM amount", "osc 1 drift", "osc 2 drift", "osc 3 drift", "osc all drift", "osc 1 PW", "osc 2 PW", "osc 3 PW", "osc all PW", "LPF drive", "LPF cutoff", 
+    "LPF resonance", "not used", "SVF cutoff","SVF resonance", "SVF mode", "LFO 1 freq", "LFO 2 freq", "LFO 3 freq", "LFO 4 freq", "LFO all freq", "LFO 1 amount", "LFO 2 amount", "LFO 3 amount", "LFO 4 amount", "LFO all amount", 
+    "LPF env amount", "amp env amount","env 3 amount", "env 4 amount", "SVF env amount", "wave env amount", "all env amount", "f-env attack", "a-env attack", "env 3 attack", "env 4 attack", "env all attack", "f-env decay",
+    "a-env decay", "env 3 decay", "env 4 decay", "env all decay", "f-env sustain", "a-env sustain", "env 3 sustain", "env 4 sustain", "env all sustain", "f-env release", "a-env release", "env 3 release", "env 4 release",
+    "env all release", "w-env o1/t1", "w-env o2/t1", "w-env o3/t1", "w-env o1/t2", "w-env o2/t2", "w-env o3/t2", "w-env o1/t3", "w-env o2/t3", "w-env o3/t3", "w-env o1/t4", "w-env o2/t4", "w-env o3/t4", "w-env o1/t5", "w-env o5/t5",
+    "w-env o3/t5", "w-env o1/t6", "w-env o2/t6", "w-env o3/t6", "w-env o1/p1", "w-env o2/p1", "w-env o3/p1", "w-env o1/p2", "w-env o2/p2", "w-env o3/p2", "w-env o1/p3", "w-env o2/p3", "w-env o3/p3", "w-env o1/p4", "w-env o2/p4",
+    "w-env o3/p4", "w-env o1/p5", "w-env o2/p5", "w-env o3/p5", "w-env o1/p6", "w-env o2/p6", "w-env o3/p6", "pan spread", "effect 1 mix", "effect 1 par 1", "effect 1 par 2", "effect 1 par 3", "effect 2 mix", "effect 2 par 1", 
+    "effect 2 par 2", "effect 2 par 3", "osc 1 fine", "osc 2 fine", "osc 3 fine", "osc all fine", "mod 1 amount", "mod 2 amount", "mod 3 amount", "mod 4 amount", "mod 5 amount", "mod 6 amount", "mod 7 amount", "mod 8 amount", "smpl start time",
+}
+
+function destination(valueObject,value)
+  local control = valueObject:getControl():getId()
+    controls.get(control):setName (DESTINATION[value])
+end
+
+local SOURCE = {[0]="Source off","osc 1","osc 2","osc 3","filter envelope","amp envelope","LFO 1", "LFO 2","LFO 3", "LFO 4","envelope 3","envelope 4","osc1 wave env", "osc 2 wave env", "osc 3 wave env", "PB wheel", "Mod wheel",
+    "velocity", "pressure", "foot pedal", "midi expression", "note number", "random", "DC", "noise", "audio out", "audio in", "MPE PB", "MPE Y axis", "midi breath ctrl",
+}
+
+function source(valueObject,value)
+  local control = valueObject:getControl():getId()
+    controls.get(control):setName (SOURCE[value])
+end
+
+-- helper function to get a specific bit series from a value
+local function getBits(value, start, length) 
+    -- Calculate the mask by shifting (1 << length) - 1 to the correct position
+    local mask = (1 << length) - 1
+    -- Shift the mask to the starting position and apply it to the value
+    return (value >> (9 - start - length)) & mask
+end
+
+-- helper function to concatenate two arrays. Used for SysEx message construction
+local function concat(t1, t2)
+  local t = {}
+  for i=1,#t1 do t[#t+1] = t1[i] end
+  for i=1,#t2 do t[#t+1] = t2[i] end
+  return t
+end
+
+-- ── Helper: safe controls.get() (pcall-wrapped for deleted/invalid IDs) ────────
+local function safeGet(id)
+  local ok, c = pcall(controls.get, id)
+  return ok and c or nil
+end
+
+function displayProg (valueObject, value)
+  local bankTxt={"B1","B2","B3","B4","B5"} -- abbreviations of the bank names
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER) + 1
+  local progName = nameBank[bankNum][value+1]
+  local c = safeGet(CTRL_PROG_NUMBER); if c then c:setName(progName) end
+  return (bankTxt[bankNum].."-"..string.format("P%03d",value+1))
+end
+
+-- ── ADSR value-in-name suffix ───────────────────────────────────────────────
+-- Appends the live value of an ADSR envelope's primary stage to its tile
+-- title, e.g. "AMP ATTACK" -> "AMP ATTACK 101". The base (unsuffixed) name is
+-- captured the first time each control is seen so repeat updates don't keep
+-- stacking suffixes onto an already-modified name.
+
+local adsrBaseNames = {}
+
+function adsrValueName(valueObject, value)
+  local ctrl = valueObject:getControl()
+  --if not ctrl then return end
+  local id = ctrl:getId()
+  if not adsrBaseNames[id] then adsrBaseNames[id] = ctrl:getName() end
+  ctrl:setName(adsrBaseNames[id] .. " " .. string.format("%d", value))
+  -- print ("ctl = "..id..", base Name = "..ahdsrBaseNames[id])
+end
+
+---------- midi request functions ---------------------
+-- request device info from the 3rd Wave
+function deviceInquiry(valueObject,value)
+  local message = {0x7E,0x00,0x06,0x01}
+  midi.sendSysex(port,message)
+end
+
+-- request data for a 3rd Wave program p from bank b (including sequencer data)
+function getProgramData(b,p)
+  local message = concat(SYSEX_HEADER,{0x05,b,p})
+  midi.sendSysex(port,message)
+end
+
+-- request a program name
+function getProgramName(valueObject,value)
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER)
+  local progNum = parameterMap.get (deviceId, PT_VIRTUAL, PROG_NUMBER)
+  local message = concat(SYSEX_HEADER,{0x10,bankNum,progNum})
+  midi.sendSysex(port,message)
+end
+
+-- request the data in the edit buffer
+function getBufferData(valueObject,value)
+  local message = concat(SYSEX_HEADER,{0x06})
+  midi.sendSysex(port,message)
+end
+
+-- request wavetable count by type
+function getWaveCount(valueObject,value)
+  local message = concat(SYSEX_HEADER,{0x07})
+  midi.sendSysex(port,message)
+end
+
+-------- midi send functions ---------------------
+function sendNRPN(ch, nrpn, value)
+  midi.sendControlChange (port , ch , 99, math.floor(nrpn/128))
+  midi.sendControlChange (port , ch , 98, nrpn%128)
+  midi.sendControlChange (port , ch , 6, math.floor(value/128))
+  midi.sendControlChange (port , ch , 38, value%128)
+end
+
+function selectIt(valueObject, value)
+  if value==0 then return end
+  local message = valueObject:getMessage ()
+  local parameterNumber = message:getParameterNumber ()
+  local messageValue = message:getValue ()
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, parameterNumber-messageValue -1)
+  local progNum = parameterMap.get (deviceId, PT_VIRTUAL, parameterNumber-messageValue ) + messageValue - 2
+  if progNum == 100 then progNum= 0 end
+  if progNum == -1   then progNum=99  end
+  parameterMap.set (deviceId, PT_VIRTUAL, parameterNumber-messageValue,progNum)
+  midi.sendControlChange(port , channel , 32, bankNum)
+  midi.sendProgramChange(port , channel , progNum)
+  -- request patch 
+  getProgramData(bankNum,progNum)
+end
+
+--------------------------- Timer-based program name scanning all programs in all banks ----------------------------------------
+-- State tracking for the patch scanner
+local patchScanState = {
+  bank = 0,           -- current bank (0-4)
+  patch = 0,          -- current program (0-99)
+  isRunning = false   -- scanner active flag
+}
+
+-- Start the patch scanner (sends 5 requests per second)
+function startPatchScanner(valueObject,value)
+  if value == 0 then return end
+  if patchScanState.isRunning then
+    print("Program scanner already running")
+    return
+  end
+  patchScanState.isRunning = true
+  patchScanState.bank = 0
+  patchScanState.patch = 0
+  print("Starting program scanner: 5 banks × 100 patches")
+  timer.enable()
+end
+
+-- function to stop the patch scanner
+local function stopPatchScanner()
+  timer.disable()
+  patchScanState.isRunning = false
+  flushNameBankIfDirty()   -- final save at end of scan
+  print("Program scanner stopped")
+end
+
+local SCAN_HEADER = concat(SYSEX_HEADER,{0x10})
+
+-- Timer callback (called by Electra One runtime)
+function timer.onTick()
+  if not patchScanState.isRunning then return end
+  -- Send the sysex request for current bank/patch
+  local msg = concat(SCAN_HEADER, {patchScanState.bank, patchScanState.patch})
+  midi.sendSysex(port, msg)
+  print(string.format("Requesting Bank %d, Program %03d", patchScanState.bank, patchScanState.patch))
+  -- Advance to next patch
+  patchScanState.patch = patchScanState.patch + 1
+  -- Check if we've reached the end of this bank
+  if patchScanState.patch >= 100 then
+    patchScanState.patch = 0
+    patchScanState.bank = patchScanState.bank + 1
+    -- Check if we've completed all 4 banks
+    if patchScanState.bank > 4 then
+      patchScanState.bank = 0
+      print("Program scanner cycle complete")
+      stopPatchScanner()
+      parameterMap.set(deviceId, PT_VIRTUAL, 10024, 0)
+    end
+  end
+end
+
+-- assigns sysEx MIDI values from received patch to corresponding preset parameter values: {byte #, parameter type, nrpn #}
+function assignParam()   
+  if not sysExPatch[2] then return end -- do not process if not parsed
+  local sysEx2Param = {{133,0,10001},{3,0,10002},{4,0,10003},{5,0,10004},{6,0,10005},{7,0,10006},{8,0,10007},{9,0,10008},{10,0,10009},{11,0,10010},{12,0,10011},{13,0,10012},{14,0,10013},{15,0,10014},{16,0,10015},{17,0,10016},{34,0,2},{35,0,3},{36,0,4},
+                     {37,0,5},{39,1,5},{40,0,7},{41,1,35},{43,0,9},{44,0,10},{45,0,11},{46,0,12},{47,0,13},{48,1,3},{49,12,14},{51,1,15},{53,1,9},{54,12,16},{56,0,14},{57,0,15},{59,1,12},{60,1,119},{61,1,33},{62,1,34},{63,0,17},{64,0,18},
+                     {65,0,19},{66,0,20},{69,1,37},{70,12,17},{72,1,18},{74,1,38},{75,12,19},{77,0,23},{78,0,24},{80,1,39},{81,1,40},{82,1,41},{83,1,42},{84,0,26},{85,0,27},{86,0,28},{87,0,29},{90,1,65},{91,12,20},{93,1,21},{95,1,43},{96,12,22},
+                     {98,0,32},{99,0,33},{101,1,71},{102,1,72},{103,1,73},{104,1,44},{105,0,35},{106,0,36},{107,0,37},{108,0,38},{111,12,23},{113,12,24},{115,12,25},{117,12,26},{119,12,27},{121,0,41},{122,0,42},{123,0,43},{124,0,44},{125,1,80},
+                     {126,1,36},{127,0,45},{128,0,46},{129,1,75},{130,1,79},{131,12,29},{133,12,28},{135,1,76},{137,1,77},{138,1,78},{139,0,48},{142,0,51},{143,0,52},{146,1,86},{147,1,87},{148,1,88},{149,1,89},{150,0,55},{151,0,56},{152,0,57},
+                     {153,0,58},{155,1,90},{156,1,91},{157,1,92},{158,1,93},{159,0,60},{160,0,61},{161,0,62},{162,0,63},{163,1,94},{164,1,95},{165,1,117},{166,1,103},{167,0,64},{168,0,65},{169,0,66},{170,0,67},{171,0,68},{172,12,30},{174,1,81},
+                     {175,0,69},{176,0,70},{177,0,71},{178,1,82},{179,0,72},{180,0,73},{181,0,74},{182,0,75},{183,0,76},{185,1,83},{186,12,31},{188,1,84},{189,0,78},{190,0,79},{191,0,80},{192,1,85},{193,0,81},{194,0,82},{195,0,83},{196,0,84},
+                     {197,0,85},{199,1,104},{201,0,88},{202,0,89},{204,1,108},{205,1,109},{206,0,91},{207,0,92},{208,0,93},{209,0,94},{210,1,110},{211,0,95},{212,0,96},{213,0,97},{214,0,98},{217,1,112},{218,0,101},{219,1,113},{220,0,102},{221,0,103},
+                     {222,0,104},{223,0,105},{224,0,106},{225,0,107},{226,0,108},{227,0,109},{229,1,105},{230,0,111},{231,1,118},{232,0,112},{233,1,107},{234,0,113},{235,0,114},{236,0,115},{237,0,16003},{239,0,116},{240,0,117},{241,0,118},{242,0,119},
+                     {243,1,116},{244,0,120},{245,0,121},{246,0,122},{247,0,123},{248,0,124},{252,0,128},{253,0,129},{254,0,130},{255,0,131},{256,0,256},{257,0,257},{258,0,258},{259,0,259},{260,0,384},{261,0,385},{262,0,386},{263,0,387},
+                     {264,0,512},{265,0,513},{266,0,514},{267,0,515},{268,0,640},{269,0,641},{270,0,642},{271,0,643},{272,0,768},{273,0,769},{274,0,770},{275,0,771},{276,0,896},{277,0,897},{278,0,898},{279,0,899},{280,0,1024},{281,0,1025},
+                     {282,0,1026},{283,0,1027},{284,0,1152},{285,0,1153},{286,0,1154},{287,0,1155},{288,0,1280},{289,0,1281},{290,0,1282},{291,0,1283},{292,0,1408},{293,0,1409},{294,0,1410},{295,0,1411},{296,0,1536},{297,0,1537},{298,0,1538},
+                     {299,0,1539},{300,0,1664},{301,0,1665},{302,0,1666},{303,0,1667},{304,0,1792},{305,0,1793},{306,0,1794},{307,0,1795},{308,0,1920},{309,0,1921},{310,0,1922},{311,0,1923},{312,0,2048},{313,0,2049},{314,0,2050},{315,0,2051},
+                     {316,0,2176},{317,0,2177},{318,0,2178},{319,0,2179},{320,0,2304},{321,0,2305},{322,0,2306},{323,0,2307},{324,0,2432},{325,0,2433},{326,0,2434},{327,0,2435},{328,0,2560},{329,0,2561},{330,0,2562},{331,0,2563},{348,0,3200},
+                     {349,0,3201},{350,0,3202},{351,0,3203},{352,0,3204},{353,0,3205},{354,0,3206},{357,0,3209},{358,0,3210},{359,0,3211},{361,0,3213},{362,0,3214},{363,0,3215},{365,0,3217},{366,0,3218},{367,0,3219},{369,0,3221},{370,0,3222},{371,0,3223},
+                     {373,0,3225},{374,0,3226},{375,0,3227},{376,0,3228},{377,0,3229},{378,0,3230},{379,0,3231},{380,0,3232},{381,0,3233},{382,0,3234},{383,0,3235},{384,0,3236},{385,0,3237},{386,0,3238},{387,0,3239},{388,0,3240},{389,0,3241},
+                     {390,0,3242},{391,0,3243},{392,0,3244},{393,0,3245}}
+  for i = 1, #sysEx2Param do
+    local sysExByte = sysEx2Param[i][1] -- byte number of sysEx payload 
+    local parType = sysEx2Param[i][2]%10 -- parameter type (0 = virtual, 1 = CC7, 2 = CC14 -- see below for value calculation, 3 = NRPN -- not used)
+    local parNum = sysEx2Param[i][3]  -- parameter number
+    local value = sysExPatch[sysExByte] -- parameter value
+    if sysEx2Param[i][2] == 12 then -- 12 stands for a type CC14 of which byte 1 has bits 8-1 and byte 2 has bit 0 on place 6
+      value = 64 * (sysExPatch[sysEx2Param[i][1]] * 2 + getBits(sysExPatch[sysEx2Param[i][1]+1], 2, 1) )
+    elseif sysEx2Param[i][1] == 237 then  -- clock rate 
+      value = (sysExPatch[sysEx2Param[i][1]] * 2 + getBits(sysExPatch[sysEx2Param[i][1]+1], 2, 1) )
+      --print("i "..i..", byte "..sysEx2Param[i][1].. ": value = "..value.."  bit 0 = "..getBits(sysExPatch[partNum][sysEx2Param[i][1]+1],2,1) )
+    end
+    parameterMap.set (deviceId, parType, parNum, value)
+  end
+  -- Update info bar with patch name
+  local patchName = ""
+  for j = 0, 15 do
+    local ch = parameterMap.get(deviceId, PT_VIRTUAL, 10001+j)
+    if ch and ch ~= 0 then patchName = patchName .. string.char(ch) end
+  end
+  if #patchName > 0 then info.setText(string.sub(patchName, 1, 20)) end
+end
+
+-- helper function to remove empty spaces from patch names before they are stored
+local function cleanPatchName(s)
+  -- remove NULs first, then trim trailing whitespace
+  s = s:gsub("%z", "")
+  s = s:gsub("%s+$", "")
+  return s
+end
+
+----------------------------- midi receive processing functions ----------------------------------------
+function midi.onSysex(midiInput, sysexBlock)
+  local function is3rdWave()
+    return sysexBlock:peek(1) == 0xF0 and sysexBlock:peek(2) == 0x00
+       and sysexBlock:peek(3) == 0x02 and sysexBlock:peek(4) == 0x4A
+       and sysexBlock:peek(5) == MODEL_BYTE
+  end
+  if not is3rdWave() then return end
+  
+  -- cmd number: 0x02 for program data, 0x03 for edit buffer data, 0x11 for program name
+  local cmd = sysexBlock:peek(6)
+  local len = sysexBlock:getLength()
+  print("3rd Wave sysex message received on interface= " .. midiInput.interface..", cmd=0x"..string.format("%02X",cmd).." len="..len)
+
+  -- program data received
+  if cmd == 0x02 then
+    local bankNum = sysexBlock:peek(7)+1
+    local progNum = sysexBlock:peek(8) 
+    print("Program data for bank ".. math.floor(bankNum)..", program " ..math.floor(progNum).." received")
+    for i = 9,1770 do
+      sysExPatch[i]=sysexBlock:peek(i)
+    end
+--    assignParam()
+
+  -- edit buffer data received
+  elseif cmd == 0x03 then
+    print("Edit buffer data received")
+    -- edit buffer does not include bank number, program number, also excludes sequencer data 
+    for i = 7,1768 do
+      sysExBuffer[i]=sysexBlock:peek(i)
+    end
+--    assignParam()
+
+  -- program name 
+  elseif cmd == 0x11 then 
+    local bankNum = sysexBlock:peek(7)+1
+    local progNum = sysexBlock:peek(8)+1
+    local rawName = ""
+    for i = 9,len-1 do
+      rawName = rawName .. string.char(sysexBlock:peek(i))
+    end
+    print("Name of bank ".. math.floor(bankNum).."  program " ..math.floor(progNum).." received: " .. rawName)
+    nameBank[bankNum][progNum] = cleanPatchName(rawName)
+    markNameBankDirty()
+
+  -- wavetable counts 
+  elseif cmd == 0x04 and len == 11 then 
+    ppgNumber = sysexBlock:peek(7)
+    userNumber = sysexBlock:peek(8)
+    analogNumber = sysexBlock:peek(9)
+    sampleNumber = sysexBlock:peek(10)
+    print("There are "..math.floor(ppgNumber).." PPG, "..math.floor(userNumber).." User, "..math.floor(analogNumber).." Analog, and "..math.floor(sampleNumber).." Sample wavetables loaded")
+  end
+end
+
+function midi.onControlChange(midiInput, ch, controllerNumber, value)
+  if controllerNumber == 32 then
+    parameterMap.set(deviceId, PT_VIRTUAL, BANK_NUMBER, value)
+  elseif controllerNumber == 99 then
+    msbNum = value
+  elseif controllerNumber == 98 then
+    lsbNum = value
+  elseif controllerNumber == 6 then
+    local nrpn = 128*msbNum + lsbNum
+    parameterMap.set(deviceId, PT_VIRTUAL, nrpn, value)
+  end
+end
+
+function midi.onProgramChange(midiInput, channel, progNum)
+  -- updates patch number parameter if change patch on the 3rd Wave
+  parameterMap.set(deviceId, PT_VIRTUAL, PROG_NUMBER, progNum) 
+  getBufferData(nil,1)
+end
+
+----------------- parameter change callback function ---------------------------
+function parameterMap.onChange(valueObjects, origin, midiValue)
+  if (origin ~= INTERNAL) then return end
+  local msg = valueObjects[1]:getMessage()
+  local pNum = msg:getParameterNumber()
+  local ctlId = valueObjects[1]:getControl():getId()
+  local ch = part1Channel
+  -- send nrpn messages for part 1 and part 2 parameters 
+  if msg:getType() == PT_VIRTUAL and pNum < 1024 then
+    local partNum = parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER)
+    if partNum == 2 then 
+      -- use part 2 midi channel
+      ch = part2Channel
+      -- reuse part 1 unison parameters for part 2 which are offset by +1
+      if pNum == 397 or pNum == 401 or pNum == 405 or pNum == 409 or pNUm == 429 or pNum == 435 then pNum = pNum + 1  end
+      -- offset all part 2 parameters by 1000
+      pNum = pNum + 1000
+    end
+    sendNRPN(ch, pNum, midiValue)
+  end
+end

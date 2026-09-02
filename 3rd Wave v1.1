@@ -533,7 +533,7 @@ local function loadRelevantPatchBytes(sysexBlock, firstByte, lastByte)
   return out
 end
 
-local function extractPatchNameFromNrpnNameArea(sysexBlock)
+local function extractPatchName(sysexBlock)
   local chars = {}
 
   for i = 9, 136, 4 do

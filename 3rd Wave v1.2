@@ -76,21 +76,20 @@ function assignChannel(valueObject, value)
   port = device:getPort()
 end
 
--- initialize program sysEx data
-local sysExBuffer = {}
-
-local sysExPatch = {}   -- sysExPatch[byte] – store patch data
+-- initialize sysEx data
+local sysExBuffer = {}  -- sysExBuffer[byte] - current edit buffer data  
+local sysExPatch = {}   -- sysExPatch[byte] – stored patch data
 
 -- NRPN reassembly registers
 local msbNum = 0
 local lsbNum = 0
 
--- to store 100 program names in 5 banks
+-- to store 100 patch names in 5 banks
 local nameBank = {}   
 -- 1 = bank A, 2= bank B, 3 = bank C, 4 = bank D, 5 = bank E 
 for y = 1,5 do        
     nameBank[y] = {}
-    -- program numbers 1..100
+    -- patch numbers 1..100
     for z = 1,100 do  
         nameBank[y][z] = ""
     end
@@ -393,11 +392,11 @@ local function safeGet(id)
   return ok and c or nil
 end
 
-function displayProg (valueObject, value)
+function displayPatchName (valueObject, value)
   local bankTxt={"B1","B2","B3","B4","B5"} -- abbreviations of the bank names
   local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER) + 1
-  local progName = nameBank[bankNum][value+1]
-  local c = safeGet(CTRL_PROG_NUMBER); if c then c:setName(progName) end
+  local patchName = nameBank[bankNum][value+1]
+  local c = safeGet(CTRL_PROG_NUMBER); if c then c:setName(patchName) end
   return (bankTxt[bankNum].."-"..string.format("P%03d",value+1))
 end
 
@@ -425,14 +424,14 @@ function deviceInquiry(valueObject,value)
   midi.sendSysex(port,message)
 end
 
--- request data for a 3rd Wave program p from bank b (including sequencer data)
-function getProgramData(b,p)
+-- request data for program number p from bank b (including sequencer data)
+function getPatchData(b,p)
   local message = concat(SYSEX_HEADER,{0x05,b,p})
   midi.sendSysex(port,message)
 end
 
--- request a program name
-function getProgramName(valueObject,value)
+-- request a patch name
+function getPatchName(valueObject,value)
   local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER)
   local progNum = parameterMap.get (deviceId, PT_VIRTUAL, PROG_NUMBER)
   local message = concat(SYSEX_HEADER,{0x10,bankNum,progNum})
@@ -451,7 +450,14 @@ function getWaveCount(valueObject,value)
   midi.sendSysex(port,message)
 end
 
--------- midi send functions ---------------------
+-- request global settings
+function getGlobals(valueObject,value)
+  local message = concat(SYSEX_HEADER,{0x0B})
+  midi.sendSysex(port,message)
+end
+
+-------- send midi nrpn message ---------------------
+-- works more reliably for standard MSB first nrpn messages than the lua API version
 function sendNRPN(ch, nrpn, value)
   midi.sendControlChange (port , ch , 99, math.floor(nrpn/128))
   midi.sendControlChange (port , ch , 98, nrpn%128)
@@ -459,6 +465,7 @@ function sendNRPN(ch, nrpn, value)
   midi.sendControlChange (port , ch , 38, value%128)
 end
 
+------- send bank/program number changes and request sysEx of loaded patch 
 function selectIt(valueObject, value)
   if value==0 then return end
   local message = valueObject:getMessage ()
@@ -472,10 +479,10 @@ function selectIt(valueObject, value)
   midi.sendControlChange(port , channel , 32, bankNum)
   midi.sendProgramChange(port , channel , progNum)
   -- request patch 
-  getProgramData(bankNum,progNum)
+  getPatchData(bankNum,progNum)
 end
 
---------------------------- Timer-based program name scanning all programs in all banks ----------------------------------------
+--------------------------- Timer-based program name scanning all patches in all banks ----------------------------------------
 -- State tracking for the patch scanner
 local patchScanState = {
   bank = 0,           -- current bank (0-4)
@@ -531,11 +538,11 @@ function timer.onTick()
 end
 
 --------------------------------------------------------------------------------
--- 3rd Wave Program State Model
+-- 3rd Wave Patch State Model
 --
 -- Compare model:
 --   COMPARE_IT = 0 -> EDIT state (user-tweaked, mutable)
---   COMPARE_IT = 1 -> LOADED state (snapshot from last program dump)
+--   COMPARE_IT = 1 -> LOADED state (snapshot from last patch dump)
 --
 -- View model:
 --   UI always shows: Single cache + currently selected Part cache
@@ -589,7 +596,7 @@ end
 -- SysEx decode helpers
 --------------------------------------------------------------------------------
 
--- Extract patch name from first 32 tuples in cmd 0x02 program dump.
+-- Extract patch name from first 32 tuples in cmd 0x02 patch dump.
 -- Each tuple is [parMSB, parLSB, valMSB, valLSB], character in valLSB.
 local function extractPatchName(sysexBlock)
   local chars = {}
@@ -765,7 +772,7 @@ function midi.onSysex(midiInput, sysexBlock)
   local len = sysexBlock:getLength()
   print("3rd Wave sysex message received on interface= " .. midiInput.interface..", cmd=0x"..string.format("%02X",cmd).." len="..len)
 
-  -- cmd 0x02 program dump byte map:
+  -- cmd 0x02 patch dump byte map:
   -- 9..136     patch name tuples (32)
   -- 137..672   single block A
   -- 673..1772  part 1 block
@@ -774,7 +781,7 @@ function midi.onSysex(midiInput, sysexBlock)
   if cmd == 0x02 then
     local bankNum = sysexBlock:peek(7)+1
     local progNum = sysexBlock:peek(8)
-    print("Program data for bank ".. math.floor(bankNum)..", program " ..math.floor(progNum).." received")
+    print("Patch data for bank ".. math.floor(bankNum)..", program " ..math.floor(progNum).." received")
 
     local patchName = extractPatchName(sysexBlock)
     if patchName ~= "" then
@@ -819,13 +826,22 @@ end
 --------------------------------------------------------------------------------
 -- Program change recieved (Synth -> UI)
 --------------------------------------------------------------------------------
-
+-- External program change on synth: mirror program index.
+-- Only updates virtual program-number parameter value. 
+-- Does not call a program sysEx dump - use select buttons
 function midi.onProgramChange(midiInput, channel, progNum)
-  -- External program change on synth: mirror program index and request fresh program dump.
   parameterMap.set(deviceId, PT_VIRTUAL, PROG_NUMBER, progNum)
   local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER)
-  -- request patch 
-  getProgramData(bankNum,progNum)
+end
+
+--------------------------------------------------------------------------------
+-- Bank MSB CC7 recieved (Synth -> UI)
+--------------------------------------------------------------------------------
+-- only updates bankNum virtual parameter value 
+function midi.onControlChange(midiInput, ch, controllerNumber, value)
+  if controllerNumber == 32 then
+    parameterMap.set(deviceId, PT_VIRTUAL, BANK_NUMBER, value)
+  end
 end
 
 --------------------------------------------------------------------------------

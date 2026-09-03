@@ -32,8 +32,8 @@
 **Version 2.0 MIDI documentation errors:**
 1. For nrpn 165-168 (LFO MIDI note sync) the options of 32 beats, 16, beats, 8 beats, 6 beats are not documented.
 2. For nrpn 342 (volume), the scaling is 1.27 not 127
-3. For nrpn's 161-164 (LFO frequency) the range is 0..255. Not -127..+127.
-4. There are 0-126 modulation destinations but the docuemntation refers to less than that (0-113 for Pitch Wheel, nrpn 35) (0-117 elsewhere)
+3. For nrpn's 161-164 (LFO frequency) the range is 0-255. Not -127 to +127.
+4. There are 0-126 modulation destinations but the documentation refers to less than that: 0-113 for nrpn 35 (Pitch Wheel) and 0-117 elsewhere
 
 **NRPN Quirks:**
 1. Analog waveform display order is "Sawtooth","Square","Triangle","Sine","Super Saw","Pink Noise","Blue Noise". But that requires using nrpn values in the order 256, 257, 262, 259, 258, 260, 261 

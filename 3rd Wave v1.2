@@ -816,10 +816,16 @@ function midi.onSysex(midiInput, sysexBlock)
   end
 end
 
+--------------------------------------------------------------------------------
+-- Program change recieved (Synth -> UI)
+--------------------------------------------------------------------------------
+
 function midi.onProgramChange(midiInput, channel, progNum)
-  -- External program change on synth: mirror program index and request fresh dump.
+  -- External program change on synth: mirror program index and request fresh program dump.
   parameterMap.set(deviceId, PT_VIRTUAL, PROG_NUMBER, progNum)
-  getBufferData(nil,1)
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER)
+  -- request patch 
+  getProgramData(bankNum,progNum)
 end
 
 --------------------------------------------------------------------------------

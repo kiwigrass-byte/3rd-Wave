@@ -712,6 +712,7 @@ local function resendVisibleToSynth()
     sendCacheToSynth(singleEdit, partSel)
     if partSel == 2 then sendCacheToSynth(part2Edit, partSel) else sendCacheToSynth(part1Edit, partSel) end
   end
+  print(string.format("Resend to synth: %s mode, Part %d", isCompareMode and "COMPARE (Base)" or "EDIT", partSel))
 end
 
 --------------------------------------------------------------------------------

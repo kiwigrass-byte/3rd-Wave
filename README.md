@@ -29,7 +29,7 @@
 
 ---
  
-**Version 2.0 MIDI documentation errors:**
+**OS 2.0 MIDI documentation errors:**
 1. For nrpn 165-168 (LFO MIDI note sync) the options of 32 beats, 16, beats, 8 beats, 6 beats are not documented.
 2. For nrpn 342 (volume), the scaling is 1.27 not 127
 3. For nrpn's 161-164 (LFO frequency) the range is 0-255. Not -127 to +127.

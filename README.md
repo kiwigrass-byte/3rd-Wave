@@ -1,6 +1,12 @@
-MIDI documentation errors.
-1. MIDI note sync options: 32 beats, 16, beats, 8 betas, 6 beats not added.
-2. Volume scaling is 1.27 not 127
+MIDI documentation errors:
+1. LFO MIDI note sync options 32 beats, 16, beats, 8 beats, 6 beats not documented for nrpn's 165-168.
+2. To match displayed values, the scaling for nrpn 342 (part volume) is 1.27 not 127 
 
-Quirks
+Quirks:
 1. Analog waveform display order is "Sawtooth","Square","Triangle","Sine","Super Saw","Pink Noise","Blue Noise". But that requires using nrpn value order of 256, 257, 262, 259, 258, 260, 261 
+
+NRPN parameters:
+A program consists of 32 nrpn parameters for patch name, 134 single parameters, 275 part 1 parameters, 275 part 2 parameters. If the program has n sequencer patterns then there are are also n x 11 sequencer parameters. 
+If MIDI multitimbral mode is enabled (global setting) then nrpn 0 is not sent in a sysEx program dump since it is not needed. 
+-- This code assumes that MIDI multitimbral mode is on!  
+-- It is not robust to the mode being off because the nrpn mapping assumes it is starting at nrpn 1 (1st character of patch name)                                                        

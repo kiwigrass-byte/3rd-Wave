@@ -2,6 +2,11 @@
 -- September 2026
 -- by @kiwigrass
 
+-----------------------------------------------------------------------------------------------------------------------------------
+-- This code assumes that MIDI multitimbral mode is on (nrpn 0 is not sent in a program sysEx dump)!  
+-- It is not robust to the mode being off because the nrpn mapping assumes it is starting at nrpn 1 (1st character of patch name)                                                        
+-----------------------------------------------------------------------------------------------------------------------------------
+
 -------------------------------- Declare Global Constants -----------------------------
 -- 3rd wave model id number: 0x01 for 24 voice products, 0x02 for 8 voice
 local MODEL_BYTE = 0x02
@@ -424,9 +429,10 @@ function deviceInquiry(valueObject,value)
   midi.sendSysex(port,message)
 end
 
--- request data for program number p from bank b (including sequencer data)
+-- request data for program number p from bank b
 function getPatchData(b,p)
-  local message = concat(SYSEX_HEADER,{0x05,b,p})
+--  local message = concat(SYSEX_HEADER,{0x05,b,p})  -- including sequencer data
+  local message = concat(SYSEX_HEADER,{0x08,b,p}) -- excluding sequencer data 
   midi.sendSysex(port,message)
 end
 

@@ -15,7 +15,7 @@ local PROG_NUMBER = 10033
 local SELECT_MINUS = 10034
 local SELECT_IT = 10035
 local SELECT_PLUS = 10036
-local PART_NUMBER = 10029
+local PART_SELECT = 10029 -- not nrpn 69 which displays part info on 3rd Wave's screen
 local COMPARE_IT = 10039
 
 -- control ids
@@ -546,8 +546,8 @@ end
 --
 -- View model:
 --   UI always shows: Single cache + currently selected Part cache
---   PART_NUMBER = 1 -> Part 1 overlay
---   PART_NUMBER = 2 -> Part 2 overlay
+--   PART_SELECT = 1 -> Part 1 overlay
+--   PART_SELECT = 2 -> Part 2 overlay
 --
 -- MIDI output:
 --   parameterMap.onChange sends NRPN for voice params (<1024)
@@ -578,7 +578,7 @@ end
 
 -- Current visible part selector (1 or 2)
 local function getPartSel()
-  return parameterMap.get(deviceId, PT_VIRTUAL, PART_NUMBER) or 1
+  return parameterMap.get(deviceId, PT_VIRTUAL, PART_SELECT) or 1
 end
 
 -- Compare mode flag:
@@ -867,7 +867,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   local pType = msg:getType()
 
   -- UI/meta controls first (no direct NRPN for these)
-  if pType == PT_VIRTUAL and pNum == PART_NUMBER then
+  if pType == PT_VIRTUAL and pNum == PART_SELECT then
     repaintFromVisibleCaches()
     return
   end

@@ -1,14 +1,18 @@
 MIDI documentation errors:
-1. For nrpn 165-168 (LFO MIDI note sync) the options of 32 beats, 16, beats, 8 beats, 6 beats are not documented (it is mentioned in the OS 2.0 release notes).
+1. For nrpn 165-168 (LFO MIDI note sync) the options of 32 beats, 16, beats, 8 beats, 6 beats are not documented.
 2. For nrpn 342 (volume), the scaling is 1.27 not 127
 3. For nrpn's 161-164 (LFO frequency) the range is 0..255. Not -127..+127.
+4. There are 0-126 modulation destinations but the docuemntation refers to less than that (0-113 for Pitch Wheel, nrpn 35) (0-117 elsewhere)
 
 Quirks:
-1. Analog waveform display order is "Sawtooth","Square","Triangle","Sine","Super Saw","Pink Noise","Blue Noise". But that requires using nrpn value order of 256, 257, 262, 259, 258, 260, 261 
+1. Analog waveform display order is "Sawtooth","Square","Triangle","Sine","Super Saw","Pink Noise","Blue Noise". But that requires using nrpn values in the order 256, 257, 262, 259, 258, 260, 261 
 
 NRPN parameters:
 - If MIDI multitimbral mode is enabled (global setting) then nrpn 0 is not sent in a sysEx program dump since it is not needed. This code assumes that MIDI multitimbral mode is on! It is not robust to the mode being off because the nrpn mapping assumes it is starting at nrpn 1 (1st character of patch name)                                                        
 - A program consists of 32 nrpn parameters for patch name, 134 single parameters (assuming MIDI multitimbral mode is on), 275 part 1 parameters, 275 part 2 parameters. If the program has n sequencer patterns then there are are also n x 11 sequencer parameters.
+
+[3rd Wave MIDI CC + SysEx Spec v2.0.xlsx](https://github.com/user-attachments/files/31797211/3rd.Wave.MIDI.CC.%2B.SysEx.Spec.v2.0.xlsx)
+[3rd Wave MIDI CC + SysEx Spec v2.0.pdf](https://github.com/user-attachments/files/31797194/3rd.Wave.MIDI.CC.%2B.SysEx.Spec.v2.0.pdf)
 
 [readme_2_0.txt](https://github.com/user-attachments/files/31796956/readme_2_0.txt)
 3rd Wave OS version 2.0

@@ -750,6 +750,15 @@ local function repaintFromVisibleCaches()
   isApplyingCache = false
 end
 
+local function syncWtUiFromSynthParams()
+  wtSyncing = true
+  for i = 1, #WT_SYNTH_PARAMS do
+    local s = parameterMap.get(deviceId, PT_VIRTUAL, WT_SYNTH_PARAMS[i]) or 0
+    parameterMap.set(deviceId, PT_VIRTUAL, WT_UI_PARAMS[i], synthToUi(s))
+  end
+  wtSyncing = false
+end
+
 --------------------------------------------------------------------------------
 -- NRPN send helpers
 --------------------------------------------------------------------------------
@@ -884,6 +893,7 @@ function midi.onSysex(midiInput, sysexBlock)
 
     validateCaches() -- optional debug
     repaintFromVisibleCaches()
+    syncWtUiFromSynthParams()
 
   -- edit buffer data received (doesn't contain bank byte or program number byte)
   -- cmd 0x03 edit buffer dump byte map:

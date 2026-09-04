@@ -2,7 +2,7 @@
 # Groove Synthesizer 3rd Wave 8M with patch parsing and comparison mode
 
 - Synth must be on at least OS 2.0 (August 2026)
-- The 8M is a 2-part synth. The preset might work with the 4-part 24M model, but only for up to 2 parts. To use the 24M change the MODEL_BYTE = 0x02 at the top of the Lua code to MODEL_BYTE = 0x01.
+- The 8M is a 2-part synth. The preset might work with the 4-part 24M model, but only for up to 2 parts. To use the 24M change the MODEL_BYTE = 0x02 to 0x01 at the top of the Lua code.
 - The preset will not work as expected unless the MIDI multitimbral mode is turned on in the global settings.
 - The preset is built for the default factory P U A wavetables. Need to change wavetable names and adjust *count* in WT_SEGMENTS accordingly if different wavetables are used.   
 - I have the single parameters and the part 1 parameters sending on MIDI channel 1, and the part 2 parameters sending on channel 2. Change accordingly.

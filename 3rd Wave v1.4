@@ -1,0 +1,1026 @@
+-- Preset for Groove Synth 3rd Wave 8M
+-- September 2026
+-- by @kiwigrass
+
+-----------------------------------------------------------------------------------------------------------------------------------
+-- This code assumes that MIDI multitimbral mode is on (nrpn 0 is not sent in a program sysEx dump)!  
+-- It is not robust to the mode being off because the nrpn mapping assumes it is starting at nrpn 1 (1st character of patch name)                                                        
+-----------------------------------------------------------------------------------------------------------------------------------
+
+-------------------------------- Declare Global Constants -----------------------------
+-- 3rd wave model id number: 0x01 for 24 voice products, 0x02 for 8 voice
+local MODEL_BYTE = 0x02
+
+-- header for 3rd Wave sysEx messages (will recognize either model id byte)
+local SYSEX_HEADER = {0x00,0x02,0x4A,0x02}
+
+-- virtual parameter numbers
+local BANK_NUMBER = 10032
+local PROG_NUMBER = 10033
+local SELECT_MINUS = 10034
+local SELECT_IT = 10035
+local SELECT_PLUS = 10036
+local PART_SELECT = 10029 -- not nrpn 69 which displays part info on 3rd Wave's screen
+local COMPARE_IT = 10039
+
+-- control ids
+local CTRL_PROG_NUMBER = 3
+
+-----------------  Device information -----------------------------
+local currentDevice  = devices.get(1)
+local deviceId = currentDevice:getId()
+local channel = currentDevice:getChannel ()
+local port      = currentDevice:getPort ()
+
+devices.create(2, "Part 1", port, 1)
+devices.create(3, "Part 2", port, 2)
+local part1Channel = devices.get(2):getChannel ()
+local part2Channel = devices.get(3):getChannel()
+
+-- events to track
+events.subscribe(PAGES | POTS)
+
+-- Compare feature caches (key = parNum, value = 14-bit value)
+local singleBase, part1Base, part2Base = {}, {}, {}
+local singleEdit, part1Edit, part2Edit = {}, {}, {}
+
+-- Guard to prevent onChange recursion during repaint
+local isApplyingCache = false
+
+
+------------------------- initialize global variables
+-- UB-Xa-reported channels (source of truth when available)
+local wavePart1Ch = nil
+local wavePart2Ch = nil
+local channelsFromSynth = true
+
+-- populate the bottom RH screen information display on load
+local authorDate = "kiwigrass 2026" 
+info.setText(authorDate)
+
+-- Tracks how many ticks have passed for the timer.onTick function
+local amountTicks = 0 
+-- Set timer tick rate (e.g., every 200 milliseconds) 
+timer.setPeriod(250) 
+
+-- number of wavetables by type 
+local ppgNumber = 0
+local userNumber = 0
+local analogNumber = 0
+local sampleNumber = 0
+
+-- 3rd Wave-reported channel (source of truth when available)
+local midiChannel = nil
+
+-- assign MIDI channel based on Peak
+function assignChannel(valueObject, value)
+  if midiChannel == nil then return end
+  device:setChannel(midiChannel)
+  channel = device:getChannel()
+  deviceId = device:getId()
+  port = device:getPort()
+end
+
+-- initialize sysEx data
+local sysExBuffer = {}  -- sysExBuffer[byte] - current edit buffer data  
+local sysExPatch = {}   -- sysExPatch[byte] – stored patch data
+
+-- NRPN reassembly registers
+local msbNum = 0
+local lsbNum = 0
+
+-- to store 100 patch names in 5 banks
+local nameBank = {}   
+-- 1 = bank A, 2= bank B, 3 = bank C, 4 = bank D, 5 = bank E 
+for y = 1,5 do        
+    nameBank[y] = {}
+    -- patch numbers 1..100
+    for z = 1,100 do  
+        nameBank[y][z] = ""
+    end
+end
+
+-- helper to make sure bad control id numbers are not called
+local function safeGet(id)
+  local ok, c = pcall(controls.get, id)
+  return ok and c or nil
+end
+
+------------- Persistence helpers for patch-name cache ----------
+-- Electra One runtime in this preset:
+--   persist(table)
+--   recall(table)
+-- We persist a tagged flat map and rebuild nameBank on load.
+
+-- a tag to keep track of versions of patch-banks on the 3rd Wave 
+local PERSIST_TAG = "3rdWaveProgNamesV1"
+
+local function makePatchKey(bank, patch)
+  return string.format("b%d_p%03d", bank, patch) -- bank 0..4, patch 0..99
+end
+
+local function flattenNameBank(src)
+  local flat = {}
+  local count = 0
+  for b = 1, 5 do
+    for p = 1, 100 do
+      local v = src[b] and src[b][p] or ""
+      v = tostring(v or "")
+      flat[makePatchKey(b, p)] = v
+      if v ~= "" then count = count + 1 end
+    end
+  end
+  return flat, count
+end
+
+local function inflateNameBank(flat)
+  local dst = {}
+  local count = 0
+  for b = 1, 5 do
+    dst[b] = {}
+    for p = 1, 100 do
+      local v = (flat and flat[makePatchKey(b, p)]) or ""
+      dst[b][p] = v
+      if v ~= "" then count = count + 1 end
+    end
+  end
+  return dst, count
+end
+
+local function saveNameBank()
+  local flat, count = flattenNameBank(nameBank)
+  local payload = {
+    _tag = PERSIST_TAG,
+    names = flat
+  }
+  local ok, err = pcall(persist, payload)
+  if ok then
+    print(string.format("nameBank persisted (%d non-empty names)", count))
+  else
+    print("nameBank persist failed: " .. tostring(err))
+  end
+end
+
+local function loadNameBank()
+  local payload = {}
+  local ok, err = pcall(recall, payload) -- recall(destinationTable)
+  if not ok then
+    print("nameBank recall failed: " .. tostring(err))
+    return
+  end
+  if payload._tag ~= PERSIST_TAG then
+    print("nameBank recall: no matching persisted payload tag")
+    return
+  end
+  if type(payload.names) ~= "table" then
+    print("nameBank recall: payload.names missing/invalid")
+    return
+  end
+  local rebuilt, count = inflateNameBank(payload.names)
+  nameBank = rebuilt
+  print(string.format("nameBank restored (%d non-empty names)", count))
+end
+
+-- Debounced/controlled persistence during large scans
+local nameBankDirty = false
+local nameBankUpdates = 0
+local SAVE_EVERY_N_UPDATES = 50 -- tune if desired
+
+local function markNameBankDirty()
+  nameBankDirty = true
+  nameBankUpdates = nameBankUpdates + 1
+  -- periodic checkpoint save during long scans
+  if (nameBankUpdates % SAVE_EVERY_N_UPDATES) == 0 then
+    saveNameBank()
+    nameBankDirty = false
+  end
+end
+
+local function flushNameBankIfDirty()
+  if nameBankDirty then
+    saveNameBank()
+    nameBankDirty = false
+  end
+end
+
+function preset.onLoad()
+  loadNameBank()  -- restore cached patch names first
+  pages.display(1)
+end
+
+function preset.onReady()
+  getWaveCount(nil,1) -- number of wave tables
+end
+
+-- format master output Pan
+function pan(valueObject,value)
+  local control = valueObject:getControl():getId()
+  local side =" L"
+  if (value < 0 ) then 
+    controls.get(control):setColor (BLUE)
+  elseif (value == 0) then
+    side = " Center"
+    controls.get(control):setColor (WHITE)
+  elseif (value > 0) then
+    side = " R"
+    controls.get(control):setColor (RED)
+  end
+  return(value)
+end
+
+ 
+function percent (valueObject, value)
+    return (string.format ("%.1f%%", value/1.27))
+end
+
+function zeroOne (valueObject, value)
+    return (string.format ("%.2f", value/127))
+end
+
+function gain (valueObject, value)
+    return (string.format ("%.0f", (value/1.27)))
+end
+
+function displayBpm(valueObject,value)
+   return(math.floor(value) .. " bpm")
+end
+
+
+-- UI params (visible controls), one per oscillator
+local WT_UI_PARAMS    = {10040, 10041, 10042}
+-- Synth wavetable params (actual NRPN-mapped virtual params)
+local WT_SYNTH_PARAMS = {102,   103,   104}
+
+local wtSyncing = false
+local wtLastUi = nil
+local wtLastSynth = nil
+
+local function findIndex(t, v)
+  for i = 1, #t do if t[i] == v then return i end end
+  return nil
+end
+
+-- Real synth ranges (change only these if firmware/library changes)
+local WT_SEGMENTS = {
+  { tag="P", synthStart=0,   count=36 }, -- can be up to 48
+  { tag="U", synthStart=128, count=56 }, -- can be up to 64
+  { tag="A", synthStart=256, count=7  },
+  { tag="WM", synthStart=384, count=1  },
+  { tag="S", synthStart=512, count=11 },
+}
+
+-- Build UI starts automatically
+local function buildUiStarts(segments)
+  local ui = 0
+  for _,seg in ipairs(segments) do
+    seg.uiStart = ui
+    seg.uiEnd   = ui + seg.count - 1
+    ui = ui + seg.count
+  end
+  return ui - 1 -- max UI value
+end
+
+local WT_UI_MAX = buildUiStarts(WT_SEGMENTS)
+
+local function uiToSynth(ui)
+  local u = math.floor((ui or 0) + 0.5)
+  if u < 0 then u = 0 end
+  if u > WT_UI_MAX then u = WT_UI_MAX end
+
+  for _,seg in ipairs(WT_SEGMENTS) do
+    if u >= seg.uiStart and u <= seg.uiEnd then
+      return seg.synthStart + (u - seg.uiStart), seg.tag
+    end
+  end
+  return 0, "P"
+end
+
+local function synthToUi(sv)
+  local s = math.floor((sv or 0) + 0.5)
+
+  for i,seg in ipairs(WT_SEGMENTS) do
+    local s0, s1 = seg.synthStart, seg.synthStart + seg.count - 1
+    if s >= s0 and s <= s1 then
+      return seg.uiStart + (s - s0), seg.tag
+    end
+
+    -- dead zone clamps to previous segment end
+    local nextSeg = WT_SEGMENTS[i+1]
+    if nextSeg and s > s1 and s < nextSeg.synthStart then
+      return seg.uiEnd, seg.tag
+    end
+  end
+
+  if s < WT_SEGMENTS[1].synthStart then return WT_SEGMENTS[1].uiStart, WT_SEGMENTS[1].tag end
+  local last = WT_SEGMENTS[#WT_SEGMENTS]
+  return last.uiEnd, last.tag
+end
+
+local WAVETABLE = {
+  -- PPG: 0..35
+  [0]="Wavetable P00","Wavetable P01","Wavetable P02","Wavetable P03","Wavetable P04","Wavetable P05","Wavetable P06","Wavetable P07","Wavetable P08","Wavetable P09","Wavetable P10","Wavetable P11","Wavetable P12","Wavetable P13","Wavetable P14",
+      "Wavetable P15","Wavetable P16","Wavetable P17","Wavetable P18","Wavetable P19","Wavetable P20","Wavetable P21","Wavetable P22","Wavetable P23","Wavetable P24","Wavetable P25","Wavetable P26","Wavetable P27","Wavetable P28","Wavetable P29",
+      "Wavetable P30","Wavetable P31","Wavetable P32","Wavetable P33","VS_0-63","VS_64-127",
+-- USER: 128..183
+[128]="Additive_Bell_17",
+[129]="HumanVowelSweep",
+[130]="DrewWave",
+[131]="GrooveSynthesis-WaveTable_BC",
+[132]="Flute-Harmonics",
+[133]="CoolFMDirty-WaveTable_DN",
+[134]="BID700E-WaveTable_KK",
+[135]="KnobGrotto6-WaveTable_DN",
+[136]="Burble-WaveTable_DN",
+[137]="PrimefallOctaveDirty96k-WaveTable_DN",
+[138]="MultiWave96k-WaveTable_DN",
+[139]="MetalSweep96k-WaveTable_DN",
+[140]="ZigZag",
+[141]="RandomWaves-KK",
+[142]="CrossoverHMXdirty-WaveTable_DN",
+[143]="LowSquareSync-WaveTable_DN",
+[144]="RippinStrange-WaveTable_DN",
+[145]="Buchla208cB-td_KK",
+[146]="FIIx_Arr1",
+[147]="Ringshifted96k-WaveTable_DN",
+[148]="Fairlight_Harmonic_Doodle",
+[149]="FiveOscComb-WaveTable_DN",
+[150]="HarmonicSpreadClip-WaveTable_DN",
+[151]="14DirtySweep2_96k-WaveTable_DN",
+[152]="BarberpoleTurbosaw-WaveTable_DN",
+[153]="Science_Channel",
+[154]="Metal_Bubbles",
+[155]="DrumWaveTables-WaveTable_KK",
+[156]="Fuzzbomb96k-WaveTable_DN",
+[157]="Ooo_Aah_Sweep",
+[158]="Prime_Fall-WaveTable",
+[159]="RingshiftedB96k-WaveTableDN",
+[160]="KnobGrottoArp16-WaveTable_DN",
+[161]="Fairlight_Mode1_Loop",
+[162]="Fairlight_Mode1_Riser",
+[163]="Ring_Shift_C",
+[164]="Turbo_Bubbles",
+[165]="Harmonic_Dirt_Spread",
+[166]="TurboHamRadio",
+[167]="Addivie_Bell_Lower",
+[168]="ResVactrolSquare",
+[169]="208 Easel 76-H-WaveTable",
+[170]="Keyumay",
+[171]="Arp_4072_Saw",
+[172]="Arp_4072_Square",
+[173]="Buchla296eSpectra5-WaveTable",
+[174]="Buchla259Dmx7-WaveTable",
+[175]="208c 20-A-WaveTable",
+[176]="FM_Crush",
+[177]="Synclav_FM_1",
+[178]="Dub_Grind",
+[179]="SineFold",
+[180]="Big_Bang",
+[181]="Synclav_5",
+[182]="Additive_8_Bit",
+[183]="Harmonic_Aah",
+  -- ANALOG: 256..262
+  [256]="Sawtooth",[257]="Square",[258]="SuperSaw",[259]="Sine",[260]="-> Pink Noise",[261]="-> Blue Noise",[262]="Triangle",
+
+  -- SAMPLE: 512..522
+  [512]="Drums Vinyl Subs&Snares",[513]="Drums Vinyl Cymbals&Toms",[514]="TubeBell",[515]="Marine vocal 3",[516]="mT Kit",[517]="Kalimba",[518]="CowbellNote",[519]="Electric Bass EQ",[520]="808 Kit",[521]="Hanger Drums",[522]="S10"
+}
+
+function waveTableName(valueObject, value)
+  local control = valueObject:getControl():getId()
+  local u = math.floor((value or 0) + 0.5)
+  local s,tag = uiToSynth(u) -- map UI -> synth domain first
+  local name = "Wavetable P00"
+  if s >= 0 and s <= 35 then
+    name = WAVETABLE[s] or "Wavetable P00"
+  elseif s >= 128 and s <= 183 then
+    name = WAVETABLE[s] or "U00"
+  elseif s >= 256 and s <= 262 then
+    name = WAVETABLE[s] or "A00"
+  elseif s == 384 then
+    name = "WM"
+  elseif s >= 512 and s <= 522 then
+    name = WAVETABLE[s] or "S00"
+  end
+  controls.get(control):setName(name)
+end
+
+function waveTableFormat(valueObject, value)
+  local u = math.floor((value or 0) + 0.5)
+  local s,tag = uiToSynth(u) -- map UI -> synth domain first
+  if s >= 0 and s <= 35 then
+    return string.format("P%02d", s)
+  elseif s >= 128 and s <= 183 then
+    return string.format("U%02d", s - 128)
+  elseif s >= 256 and s <= 262 then
+    return string.format("A%02d", s - 256)
+  elseif s == 384 then
+    return "W"
+  elseif s >= 512 and s <= 522 then
+    return string.format("S%02d", s - 512)
+  end
+  return ""
+end
+
+local DESTINATION = {[0]="Destination off","osc 1 freq","osc 2 freq","osc 3 freq","osc all freq","osc 1 level","osc 2 level", "osc 3 level","osc all level", "osc 1 wave env","osc 2 wave env","osc 3 wave env","osc all wave env",
+    "osc 1 FM amount", "osc2 FM amount","osc3 FM amount", "osc all FM amount", "osc 1 drift", "osc 2 drift", "osc 3 drift", "osc all drift", "osc 1 PW", "osc 2 PW", "osc 3 PW", "osc all PW", "LPF drive", "LPF cutoff", 
+    "LPF resonance", "not used", "SVF cutoff","SVF resonance", "SVF mode", "LFO 1 freq", "LFO 2 freq", "LFO 3 freq", "LFO 4 freq", "LFO all freq", "LFO 1 amount", "LFO 2 amount", "LFO 3 amount", "LFO 4 amount", "LFO all amount", 
+    "LPF env amount", "amp env amount","env 3 amount", "env 4 amount", "SVF env amount", "wave env amount", "all env amount", "f-env attack", "a-env attack", "env 3 attack", "env 4 attack", "env all attack", "f-env decay",
+    "a-env decay", "env 3 decay", "env 4 decay", "env all decay", "f-env sustain", "a-env sustain", "env 3 sustain", "env 4 sustain", "env all sustain", "f-env release", "a-env release", "env 3 release", "env 4 release",
+    "env all release", "w-env o1/t1", "w-env o2/t1", "w-env o3/t1", "w-env o1/t2", "w-env o2/t2", "w-env o3/t2", "w-env o1/t3", "w-env o2/t3", "w-env o3/t3", "w-env o1/t4", "w-env o2/t4", "w-env o3/t4", "w-env o1/t5", "w-env o5/t5",
+    "w-env o3/t5", "w-env o1/t6", "w-env o2/t6", "w-env o3/t6", "w-env o1/p1", "w-env o2/p1", "w-env o3/p1", "w-env o1/p2", "w-env o2/p2", "w-env o3/p2", "w-env o1/p3", "w-env o2/p3", "w-env o3/p3", "w-env o1/p4", "w-env o2/p4",
+    "w-env o3/p4", "w-env o1/p5", "w-env o2/p5", "w-env o3/p5", "w-env o1/p6", "w-env o2/p6", "w-env o3/p6", "pan spread", "effect 1 mix", "effect 1 par 1", "effect 1 par 2", "effect 1 par 3", "effect 2 mix", "effect 2 par 1", 
+    "effect 2 par 2", "effect 2 par 3", "osc 1 fine", "osc 2 fine", "osc 3 fine", "osc all fine", "mod 1 amount", "mod 2 amount", "mod 3 amount", "mod 4 amount", "mod 5 amount", "mod 6 amount", "mod 7 amount", "mod 8 amount", "smpl start time",
+}
+
+function destination(valueObject,value)
+  local control = valueObject:getControl():getId()
+    controls.get(control):setName (DESTINATION[value])
+end
+
+local SOURCE = {[0]="Source off","osc 1","osc 2","osc 3","filter envelope","amp envelope","LFO 1", "LFO 2","LFO 3", "LFO 4","envelope 3","envelope 4","osc1 wave env", "osc 2 wave env", "osc 3 wave env", "PB wheel", "Mod wheel",
+    "velocity", "pressure", "foot pedal", "midi expression", "note number", "random", "DC", "noise", "audio out", "audio in", "MPE PB", "MPE Y axis", "midi breath ctrl",
+}
+
+function source(valueObject,value)
+  local control = valueObject:getControl():getId()
+    controls.get(control):setName (SOURCE[value])
+end
+
+-- helper function to get a specific bit series from a value
+local function getBits(value, start, length) 
+    -- Calculate the mask by shifting (1 << length) - 1 to the correct position
+    local mask = (1 << length) - 1
+    -- Shift the mask to the starting position and apply it to the value
+    return (value >> (9 - start - length)) & mask
+end
+
+-- helper function to concatenate two arrays. Used for SysEx message construction
+local function concat(t1, t2)
+  local t = {}
+  for i=1,#t1 do t[#t+1] = t1[i] end
+  for i=1,#t2 do t[#t+1] = t2[i] end
+  return t
+end
+
+-- ── Helper: safe controls.get() (pcall-wrapped for deleted/invalid IDs) ────────
+local function safeGet(id)
+  local ok, c = pcall(controls.get, id)
+  return ok and c or nil
+end
+
+function displayPatchName (valueObject, value)
+  local bankTxt={"B1","B2","B3","B4","B5"} -- abbreviations of the bank names
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER) + 1
+  local patchName = nameBank[bankNum][value+1]
+  local c = safeGet(CTRL_PROG_NUMBER); if c then c:setName(patchName) end
+  return (bankTxt[bankNum].."-"..string.format("P%03d",value+1))
+end
+
+-- ── ADSR value-in-name suffix ───────────────────────────────────────────────
+-- Appends the live value of an ADSR envelope's primary stage to its tile
+-- title, e.g. "AMP ATTACK" -> "AMP ATTACK 101". The base (unsuffixed) name is
+-- captured the first time each control is seen so repeat updates don't keep
+-- stacking suffixes onto an already-modified name.
+
+local adsrBaseNames = {}
+
+function adsrValueName(valueObject, value)
+  local ctrl = valueObject:getControl()
+  --if not ctrl then return end
+  local id = ctrl:getId()
+  if not adsrBaseNames[id] then adsrBaseNames[id] = ctrl:getName() end
+  ctrl:setName(adsrBaseNames[id] .. " " .. string.format("%d", value))
+  -- print ("ctl = "..id..", base Name = "..ahdsrBaseNames[id])
+end
+
+------------------------------------------------------------------
+--                  midi request functions                  --
+------------------------------------------------------------------
+-- request device info from the 3rd Wave
+function deviceInquiry(valueObject,value)
+  local message = {0x7E,0x00,0x06,0x01}
+  midi.sendSysex(port,message)
+end
+
+-- request data for program number p from bank b
+function getPatchData(b,p)
+--  local message = concat(SYSEX_HEADER,{0x05,b,p})  -- including sequencer data
+  local message = concat(SYSEX_HEADER,{0x08,b,p}) -- excluding sequencer data 
+  midi.sendSysex(port,message)
+end
+
+-- request a patch name
+function getPatchName(valueObject,value)
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER)
+  local progNum = parameterMap.get (deviceId, PT_VIRTUAL, PROG_NUMBER)
+  local message = concat(SYSEX_HEADER,{0x10,bankNum,progNum})
+  midi.sendSysex(port,message)
+end
+
+-- request the data in the edit buffer
+function getBufferData(valueObject,value)
+  local message = concat(SYSEX_HEADER,{0x06})
+  midi.sendSysex(port,message)
+end
+
+-- request wavetable count by type
+function getWaveCount(valueObject,value)
+  local message = concat(SYSEX_HEADER,{0x07})
+  midi.sendSysex(port,message)
+end
+
+-- request global settings
+function getGlobals(valueObject,value)
+  local message = concat(SYSEX_HEADER,{0x0B})
+  midi.sendSysex(port,message)
+end
+
+-------------------------------------------------------------
+--                  send midi nrpn message             
+-- alternative to lua API version
+-------------------------------------------------------------
+function sendNRPN(ch, nrpn, value)
+  midi.sendControlChange (port , ch , 99, math.floor(nrpn/128))
+  midi.sendControlChange (port , ch , 98, nrpn%128)
+  midi.sendControlChange (port , ch , 6, math.floor(value/128))
+  midi.sendControlChange (port , ch , 38, value%128)
+end
+
+------- send bank/program number changes and request sysEx of loaded patch 
+function selectIt(valueObject, value)
+  if value==0 then return end
+  local message = valueObject:getMessage ()
+  local parameterNumber = message:getParameterNumber ()
+  local messageValue = message:getValue ()
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, parameterNumber-messageValue -1)
+  local progNum = parameterMap.get (deviceId, PT_VIRTUAL, parameterNumber-messageValue ) + messageValue - 2
+  if progNum == 100 then progNum= 0 end
+  if progNum == -1   then progNum=99  end
+  parameterMap.set (deviceId, PT_VIRTUAL, parameterNumber-messageValue,progNum)
+  midi.sendControlChange(port , channel , 32, bankNum)
+  midi.sendProgramChange(port , channel , progNum)
+  -- request patch 
+  getPatchData(bankNum,progNum)
+end
+
+--------------------------- Timer-based program name scanning all patches in all banks ----------------------------------------
+-- State tracking for the patch scanner
+local patchScanState = {
+  bank = 0,           -- current bank (0-4)
+  patch = 0,          -- current program (0-99)
+  isRunning = false   -- scanner active flag
+}
+
+-- Start the patch scanner (sends 5 requests per second)
+function startPatchScanner(valueObject,value)
+  if value == 0 then return end
+  if patchScanState.isRunning then
+    print("Program scanner already running")
+    return
+  end
+  patchScanState.isRunning = true
+  patchScanState.bank = 0
+  patchScanState.patch = 0
+  print("Starting program scanner: 5 banks × 100 patches")
+  timer.enable()
+end
+
+-- function to stop the patch scanner
+local function stopPatchScanner()
+  timer.disable()
+  patchScanState.isRunning = false
+  flushNameBankIfDirty()   -- final save at end of scan
+  print("Program scanner stopped")
+end
+
+local SCAN_HEADER = concat(SYSEX_HEADER,{0x10})
+
+-- Timer callback (called by Electra One runtime)
+function timer.onTick()
+  if not patchScanState.isRunning then return end
+  -- Send the sysex request for current bank/patch
+  local msg = concat(SCAN_HEADER, {patchScanState.bank, patchScanState.patch})
+  midi.sendSysex(port, msg)
+  print(string.format("Requesting Bank %d, Program %03d", patchScanState.bank, patchScanState.patch))
+  -- Advance to next patch
+  patchScanState.patch = patchScanState.patch + 1
+  -- Check if we've reached the end of this bank
+  if patchScanState.patch >= 100 then
+    patchScanState.patch = 0
+    patchScanState.bank = patchScanState.bank + 1
+    -- Check if we've completed all 4 banks
+    if patchScanState.bank > 4 then
+      patchScanState.bank = 0
+      print("Program scanner cycle complete")
+      stopPatchScanner()
+      parameterMap.set(deviceId, PT_VIRTUAL, 10024, 0)
+    end
+  end
+end
+
+--------------------------------------------------------------------------------
+-- 3rd Wave Patch State Model
+--
+-- Compare model:
+--   COMPARE_IT = 0 -> EDIT state (user-tweaked, mutable)
+--   COMPARE_IT = 1 -> LOADED state (snapshot from last patch dump)
+--
+-- View model:
+--   UI always shows: Single cache + currently selected Part cache
+--   PART_SELECT = 1 -> Part 1 overlay
+--   PART_SELECT = 2 -> Part 2 overlay
+--
+-- MIDI output:
+--   parameterMap.onChange sends NRPN for voice params (<1024)
+--   while repainting from cache, outgoing MIDI is suppressed via isApplyingCache
+--------------------------------------------------------------------------------
+
+-- Loaded snapshot from latest dump (immutable until next dump)
+local singleBase, part1Base, part2Base = {}, {}, {}
+
+-- Working edit state (starts as copy of Base, then updated on user edits)
+local singleEdit, part1Edit, part2Edit = {}, {}, {}
+
+-- Guard: true only while writing cached values into parameterMap
+local isApplyingCache = false
+
+--------------------------------------------------------------------------------
+-- Utility / state helpers
+--------------------------------------------------------------------------------
+
+-- Copy one cache table (shallow copy: key/value pairs)
+local function copyCache(src)
+  local dst = {}
+  for k, v in pairs(src) do
+    dst[k] = v
+  end
+  return dst
+end
+
+-- Current visible part selector (1 or 2)
+local function getPartSel()
+  return parameterMap.get(deviceId, PT_VIRTUAL, PART_SELECT) or 1
+end
+
+-- Compare mode flag:
+-- false = Edit mode, true = Compare (Base) mode
+local function getCompareMode()
+  return (parameterMap.get(deviceId, PT_VIRTUAL, COMPARE_IT) or 0) == 1
+end
+
+-- True for synth voice params (as opposed to UI/meta controls)
+local function isVoiceParam(pNum)
+  return pNum < 1024
+end
+
+--------------------------------------------------------------------------------
+-- SysEx decode helpers
+--------------------------------------------------------------------------------
+
+-- Extract patch name from first 32 tuples in cmd 0x02 patch dump.
+-- Each tuple is [parMSB, parLSB, valMSB, valLSB], character in valLSB.
+local function extractPatchName(sysexBlock)
+  local chars = {}
+  for i = 9, 136, 4 do
+    local vLsb = sysexBlock:peek(i + 3) or 0
+    if vLsb == 0 then break end
+    chars[#chars + 1] = string.char(vLsb)
+  end
+  return table.concat(chars):gsub("%s+$", "")
+end
+
+-- Decode a tuple range into cache[parNum] = 14-bit value
+local function decodeNrpnBlockToCache(sysexBlock, startByte, endByte, cache)
+  local tupleCount = math.floor((endByte - startByte + 1) / 4)
+  for t = 0, tupleCount - 1 do
+    local i = startByte + t * 4
+    local pMsb = sysexBlock:peek(i) or 0
+    local pLsb = sysexBlock:peek(i + 1) or 0
+    local vMsb = sysexBlock:peek(i + 2) or 0
+    local vLsb = sysexBlock:peek(i + 3) or 0
+
+    local parNum = pMsb * 128 + pLsb
+    local value  = vMsb * 128 + vLsb
+    cache[parNum] = value
+  end
+end
+
+--------------------------------------------------------------------------------
+-- Cache -> UI repaint helpers (no MIDI out)
+--------------------------------------------------------------------------------
+
+local function applyCacheToParams(cache, targetParType)
+  targetParType = targetParType or PT_VIRTUAL
+  for parNum, value in pairs(cache) do
+    parameterMap.set(deviceId, targetParType, parNum, value)
+  end
+end
+
+-- Repaint visible UI parameters from current mode + part selection.
+-- Must not send MIDI; onChange is suppressed by isApplyingCache.
+local function repaintFromVisibleCaches()
+  if isApplyingCache then return end
+  isApplyingCache = true
+
+  local partSel = getPartSel()
+  local isCompareMode = getCompareMode()
+
+  -- Single layer always visible
+  if isCompareMode then
+    applyCacheToParams(singleBase, PT_VIRTUAL)
+  else
+    applyCacheToParams(singleEdit, PT_VIRTUAL)
+  end
+
+  -- Part overlay
+  if partSel == 2 then
+    if isCompareMode then
+      applyCacheToParams(part2Base, PT_VIRTUAL)
+    else
+      applyCacheToParams(part2Edit, PT_VIRTUAL)
+    end
+  else
+    if isCompareMode then
+      applyCacheToParams(part1Base, PT_VIRTUAL)
+    else
+      applyCacheToParams(part1Edit, PT_VIRTUAL)
+    end
+  end
+
+  isApplyingCache = false
+end
+
+--------------------------------------------------------------------------------
+-- NRPN send helpers
+--------------------------------------------------------------------------------
+
+-- Map UI param number to synth NRPN number for selected part.
+-- Part 2 uses +1000 offset plus special hole adjustments.
+local function toSynthParNumForPart(parNum, partSel)
+  if partSel == 2 then
+    if parNum == 397 or parNum == 401 or parNum == 405 or parNum == 409 or parNum == 429 or parNum == 435 then
+      parNum = parNum + 1
+    end
+    return parNum + 1000
+  end
+  return parNum
+end
+
+-- Send a full cache to synth on selected part/channel.
+local function sendCacheToSynth(cache, partSel)
+  local ch = (partSel == 2) and part2Channel or part1Channel
+  for parNum, value in pairs(cache) do
+    local outPar = toSynthParNumForPart(parNum, partSel)
+    sendNRPN(ch, outPar, value)
+  end
+end
+
+-- Push currently visible state to synth (used by Compare toggle).
+local function resendVisibleToSynth()
+  local partSel = getPartSel()
+  local isCompareMode = getCompareMode()
+
+  if isCompareMode then
+    sendCacheToSynth(singleBase, partSel)
+    if partSel == 2 then sendCacheToSynth(part2Base, partSel) else sendCacheToSynth(part1Base, partSel) end
+  else
+    sendCacheToSynth(singleEdit, partSel)
+    if partSel == 2 then sendCacheToSynth(part2Edit, partSel) else sendCacheToSynth(part1Edit, partSel) end
+  end
+  print(string.format("Resend to synth: %s mode, Part %d", isCompareMode and "COMPARE (Base)" or "EDIT", partSel))
+end
+
+--------------------------------------------------------------------------------
+-- Debug / validation helpers
+--------------------------------------------------------------------------------
+
+local function sortedKeys(t)
+  local keys = {}
+  if type(t) ~= "table" then return keys end
+  for k, _ in pairs(t) do keys[#keys+1] = k end
+  table.sort(keys)
+  return keys
+end
+
+local function summarizeCache(name, cache)
+  local keys = sortedKeys(cache)
+  local n = #keys
+  if n == 0 then
+    print(name .. ": empty")
+    return
+  end
+
+  local firstK, lastK = keys[1], keys[n]
+  local firstV, lastV = cache[firstK], cache[lastK]
+
+  print(string.format(
+    "%s: count=%d first=(p%d v%d) last=(p%d v%d)",
+    name, n, firstK, firstV, lastK, lastV
+  ))
+end
+
+local function validateCaches()
+  summarizeCache("singleBase", singleBase)
+  summarizeCache("part1Base",  part1Base)
+  summarizeCache("part2Base",  part2Base)
+  summarizeCache("singleEdit", singleEdit)
+  summarizeCache("part1Edit",  part1Edit)
+  summarizeCache("part2Edit",  part2Edit)
+end
+
+--------------------------------------------------------------------------------
+-- Name cleanup helper
+--------------------------------------------------------------------------------
+
+local function cleanPatchName(s)
+  s = s:gsub("%z", "")
+  s = s:gsub("%s+$", "")
+  return s
+end
+
+--------------------------------------------------------------------------------
+-- sysEx data received
+--------------------------------------------------------------------------------
+
+function midi.onSysex(midiInput, sysexBlock)
+  local function is3rdWave()
+    return sysexBlock:peek(1) == 0xF0 and sysexBlock:peek(2) == 0x00
+       and sysexBlock:peek(3) == 0x02 and sysexBlock:peek(4) == 0x4A
+       and sysexBlock:peek(5) == MODEL_BYTE
+  end
+  if not is3rdWave() then return end
+
+  local cmd = sysexBlock:peek(6)
+  local len = sysexBlock:getLength()
+  print("3rd Wave sysex message received on interface= " .. midiInput.interface..", cmd=0x"..string.format("%02X",cmd).." len="..len)
+
+  -- cmd 0x02 patch dump byte map:
+  -- 9..136     patch name tuples (32)
+  -- 137..672   single block A
+  -- 673..1772  part 1 block
+  -- 1773..1788 single block B
+  -- 1789..2888 part 2 block
+  if cmd == 0x02 then
+    local bankNum = sysexBlock:peek(7)+1
+    local progNum = sysexBlock:peek(8)
+    print( "Patch data for bank ".. math.floor(bankNum)..", program " ..math.floor(progNum).." received" )
+
+    local patchName = extractPatchName(sysexBlock)
+    if patchName ~= "" then
+      info.setText(string.sub(patchName, 1, 20))
+    end
+
+    -- Rebuild loaded snapshot
+    singleBase, part1Base, part2Base = {}, {}, {}
+    decodeNrpnBlockToCache(sysexBlock, 137, 672, singleBase)
+    decodeNrpnBlockToCache(sysexBlock, 1773, 1788, singleBase)
+    decodeNrpnBlockToCache(sysexBlock, 673, 1772, part1Base)
+    decodeNrpnBlockToCache(sysexBlock, 1789, 2888, part2Base)
+
+    -- Reset edit state from loaded snapshot
+    singleEdit = copyCache(singleBase)
+    part1Edit  = copyCache(part1Base)
+    part2Edit  = copyCache(part2Base)
+
+    validateCaches() -- optional debug
+    repaintFromVisibleCaches()
+
+  -- edit buffer data received (doesn't contain bank byte or program number byte)
+  -- cmd 0x03 edit buffer dump byte map:
+  -- 7..134     patch name tuples (32)
+  -- 135..670   single block A
+  -- 671..1770  part 1 block
+  -- 1771..1786 single block B
+  -- 1787..2886 part 2 block
+-- elseif cmd == 0x03 then
+--    print( "Current edit buffer data received" )
+
+  elseif cmd == 0x11 then
+    local bankNum = sysexBlock:peek(7)+1
+    local progNum = sysexBlock:peek(8)+1
+    local rawName = ""
+    for i = 9, len-1 do
+      rawName = rawName .. string.char(sysexBlock:peek(i))
+    end
+    print( "Name of bank ".. math.floor(bankNum).."  program " ..math.floor(progNum).." received: " .. rawName )
+    nameBank[bankNum][progNum] = cleanPatchName(rawName)
+    markNameBankDirty()
+
+  elseif cmd == 0x04 and len == 11 then
+    ppgNumber = sysexBlock:peek(7)
+    userNumber = sysexBlock:peek(8)
+    analogNumber = sysexBlock:peek(9)
+    sampleNumber = sysexBlock:peek(10)
+    print( "There are "..math.floor(ppgNumber).." PPG, "..math.floor(userNumber).." User, "..math.floor(analogNumber)..
+          " Analog, and "..math.floor(sampleNumber).." Sample wavetables loaded" )
+  end
+end
+
+--------------------------------------------------------------------------------
+-- Program change message recieved (Synth -> UI)
+--------------------------------------------------------------------------------
+-- External program change on synth: mirror program index.
+-- Only updates virtual program-number parameter value. 
+-- Does not call a program sysEx dump - use select buttons
+function midi.onProgramChange(midiInput, channel, progNum)
+  parameterMap.set(deviceId, PT_VIRTUAL, PROG_NUMBER, progNum)
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER)
+end
+
+--------------------------------------------------------------------------------
+-- Bank MSB CC7 message recieved (Synth -> UI)
+--------------------------------------------------------------------------------
+-- only updates bankNum virtual parameter value 
+function midi.onControlChange(midiInput, ch, controllerNumber, value)
+  if controllerNumber == 32 then
+    parameterMap.set(deviceId, PT_VIRTUAL, BANK_NUMBER, value)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- Parameter change callback (UI -> synth and cache)
+--------------------------------------------------------------------------------
+
+function parameterMap.onChange(valueObjects, origin, midiValue)
+  if (origin ~= INTERNAL) then return end
+
+  local msg = valueObjects[1]:getMessage()
+  local pNum = msg:getParameterNumber()
+  local pType = msg:getType()
+
+  -- UI fader changed -> convert to synth value
+  local uiIdx = (pType == PT_VIRTUAL) and findIndex(WT_UI_PARAMS, pNum) or nil
+  if uiIdx and not wtSyncing then
+    wtSyncing = true
+
+    local s,tag = uiToSynth(midiValue)
+
+    -- hide/show wavetable offset and pulse width (for this osc only)
+    local CTRL_PULSE  = {27,28,29}
+    local CTRL_OFFSET = {30,31,32}
+    local TARGET_SLOT = {4,16,28}
+    local OSC_PAGE    = 2
+
+    if s >= 256 and s <= 262 then
+      controls.get(CTRL_PULSE[uiIdx]):setSlot(TARGET_SLOT[uiIdx], OSC_PAGE)
+    else
+      controls.get(CTRL_OFFSET[uiIdx]):setSlot(TARGET_SLOT[uiIdx], OSC_PAGE)
+    end
+
+    parameterMap.set(deviceId, PT_VIRTUAL, WT_SYNTH_PARAMS[uiIdx], s)
+    wtSyncing = false
+    return
+  end
+
+  -- Synth wavetable changed -> reflect back on compact UI fader
+  local syIdx = (pType == PT_VIRTUAL) and findIndex(WT_SYNTH_PARAMS, pNum) or nil
+  if syIdx and not wtSyncing then
+    wtSyncing = true
+    parameterMap.set(deviceId, PT_VIRTUAL, WT_UI_PARAMS[syIdx], synthToUi(midiValue))
+    wtSyncing = false
+    -- no return: allow normal cache/NRPN path for synth param
+  end
+
+  -- UI/meta controls first (no direct NRPN for these)
+  if pType == PT_VIRTUAL and pNum == PART_SELECT then
+    repaintFromVisibleCaches()
+    return
+  end
+
+  if pType == PT_VIRTUAL and pNum == COMPARE_IT then
+    repaintFromVisibleCaches()
+    resendVisibleToSynth() -- comment out for visual-only compare
+    return
+  end
+
+  -- Suppress outgoing actions while repainting cache into parameterMap
+  if isApplyingCache then return end
+
+  -- Voice parameter edits -> update edit cache + send NRPN
+  if pType == PT_VIRTUAL and isVoiceParam(pNum) then
+    local uiPar = pNum
+    local outPar = pNum
+    local partNum = getPartSel()
+    local ch = part1Channel
+
+    if partNum == 2 then
+      ch = part2Channel
+      outPar = toSynthParNumForPart(outPar, 2)
+    end
+
+    -- In edit mode, persist local tweak into edit cache
+    if not getCompareMode() then
+      if singleEdit[uiPar] ~= nil then
+        singleEdit[uiPar] = midiValue
+      end
+
+      if partNum == 2 then
+        part2Edit[uiPar] = midiValue
+      else
+        part1Edit[uiPar] = midiValue
+      end
+    end
+
+    sendNRPN(ch, outPar, midiValue)
+  end
+end

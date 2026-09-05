@@ -28,6 +28,12 @@ local CTRL_PROG_NUMBER = 3
 local CTRL_PULSE  = {27,28,29}
 local CTRL_OFFSET = {30,31,32}
 local CTRL_FX2_PARAM = {318, 319, 320, 58}
+local CTRL_LFO1_SYNC = 226
+local CTRL_LFO2_SYNC = 329
+local CTRL_LFO3_SYNC = 227
+local CTRL_LFO4_SYNC = 228
+local CTRL_FX1_SYNC = 324
+local CTRL_FX2_SYNC = 326
 
 -- Visibility map by FX type value:
 local FX2_VIS = {
@@ -425,35 +431,29 @@ function showUnison2(valueObject,value)
 end
 
 function showSyncRate1(valueObject,value)
-  local CTRL_SYNC1 = 226
   local visiBool = value == 1 -- show sync rate for lfo 1 if sync is on
-  for _,id in ipairs(CTRL_SYNC1) do controls.get(id):setVisible(visiBool) end 
+  controls.get(CTRL_LFO1_SYNC):setVisible(visiBool) 
 end
 function showSyncRate2(valueObject,value)
-  local CTRL_SYNC2 = 329
   local visiBool = value == 1 -- show sync rate for lfo 1 if sync is on
-  for _,id in ipairs(CTRL_SYNC2) do controls.get(id):setVisible(visiBool) end 
+  controls.get(CTRL_LFO2_SYNC):setVisible(visiBool) 
 end
 function showSyncRate3(valueObject,value)
-  local CTRL_SYNC3 = 227
   local visiBool = value == 1 -- show sync rate for lfo 3 if sync is on
-  for _,id in ipairs(CTRL_SYNC3) do controls.get(id):setVisible(visiBool) end 
+  controls.get(CTRL_LFO3_SYNC):setVisible(visiBool) 
 end
 function showSyncRate4(valueObject,value)
-  local CTRL_SYNC4 = 228
   local visiBool = value == 1 -- show sync rate for lfo 4 if sync is on
-  for _,id in ipairs(CTRL_SYNC4) do controls.get(id):setVisible(visiBool) end 
+  controls.get(CTRL_LFO4_SYNC):setVisible(visiBool) 
 end
 
 function showSyncRateFx1(valueObject,value)
-  local CTRL_SYNC1 = {324}
   local visiBool = value == 1 -- show sync rate for fx 1 if sync is on
-  for _,id in ipairs(CTRL_SYNC1) do controls.get(id):setVisible(visiBool) end 
+  controls.get(CTRL_FX1_SYNC):setVisible(visiBool) 
 end
 function showSyncRateFx2(valueObject,value)
-  local CTRL_SYNC2 = {326}
   local visiBool = value == 1 -- show sync rate for fx 2 if sync is on
-  for _,id in ipairs(CTRL_SYNC2) do controls.get(id):setVisible(visiBool) end 
+  controls.get(CTRL_FX2_SYNC):setVisible(visiBool) 
 end
 
 function showFxParam2(valueObject, value)

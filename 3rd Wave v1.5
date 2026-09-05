@@ -393,33 +393,35 @@ function source(valueObject,value)
 end
 
 -- value functions for showing/hiding controls 
+local CTRL_UNISON1 = {60,66,61,63,46}
 function showUnison1(valueObject,value)
-  local CTRL_UNISON1 = {60,66,61,63,46}
   local visiBool = value == 1 -- show part 1 unison controls if in unsion mode
   for _,id in ipairs(CTRL_UNISON1) do controls.get(id):setVisible(visiBool) end 
 end
+
+local CTRL_UNISON2 = {412,413,414,415,416}
 function showUnison2(valueObject,value)
-  local CTRL_UNISON2 = {412,413,414,415,416}
   local visiBool = value == 1 -- show part 2 unison controls if in unsion mode
   for _,id in ipairs(CTRL_UNISON2) do controls.get(id):setVisible(visiBool) end 
 end
+
 function showSyncRate1(valueObject,value)
-  local CTRL_SYNC1 = {226}
+  local CTRL_SYNC1 = 226
   local visiBool = value == 1 -- show sync rate for lfo 1 if sync is on
   for _,id in ipairs(CTRL_SYNC1) do controls.get(id):setVisible(visiBool) end 
 end
 function showSyncRate2(valueObject,value)
-  local CTRL_SYNC2 = {329}
+  local CTRL_SYNC2 = 329
   local visiBool = value == 1 -- show sync rate for lfo 1 if sync is on
   for _,id in ipairs(CTRL_SYNC2) do controls.get(id):setVisible(visiBool) end 
 end
 function showSyncRate3(valueObject,value)
-  local CTRL_SYNC3 = {227}
+  local CTRL_SYNC3 = 227
   local visiBool = value == 1 -- show sync rate for lfo 3 if sync is on
   for _,id in ipairs(CTRL_SYNC3) do controls.get(id):setVisible(visiBool) end 
 end
 function showSyncRate4(valueObject,value)
-  local CTRL_SYNC4 = {228}
+  local CTRL_SYNC4 = 228
   local visiBool = value == 1 -- show sync rate for lfo 4 if sync is on
   for _,id in ipairs(CTRL_SYNC4) do controls.get(id):setVisible(visiBool) end 
 end
@@ -434,19 +436,22 @@ function showSyncRateFx2(valueObject,value)
   local visiBool = value == 1 -- show sync rate for fx 2 if sync is on
   for _,id in ipairs(CTRL_SYNC2) do controls.get(id):setVisible(visiBool) end 
 end
-function showfxParam2(valueObject, value)
-  local CTRL_PARAM = {318, 319, 320, 58}
-  -- Visibility map by FX type value:
-  -- each entry is {show318, show319, show320, show58}
-  local visibilityByValue = {
+
+local CTRL_FX2_PARAM = {318, 319, 320, 58}
+-- Visibility map by FX type value:
+-- each entry is {show318, show319, show320, show58}
+  local FX2_VIS = {
     [13] = {true,  true,  true,  true }, -- shimmer reverb: show all
     [10] = {true,  false, false, false}, -- room reverb: show first only
     [11] = {true,  false, false, false}, -- hall reverb: show first only
     [3]  = {true,  true,  true,  false}, -- echoplex delay: show first three
   }
-  -- default if value not listed: hide all
-  local vis = visibilityByValue[value] or {false, false, false, false}
-  for i, id in ipairs(CTRL_PARAM) do
+function showFxParam2(valueObject, value)
+  local vis = FX2_VIS[value]
+  if not vis then
+    vis = {false, false, false, false}
+  end
+  for i, id in ipairs(CTRL_FX2_PARAM) do
     controls.get(id):setVisible(vis[i])
   end
 end

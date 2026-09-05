@@ -491,155 +491,138 @@ end
 
 ----------------------------------------------------------------
 -- FX SPEC TABLES
--- kind meanings:
---   "u8"           : raw 0..255
---   "time_or_note" : depends on sync param (0=time, 1=note index 0..12)
---   "enum"         : discrete map table (e.g. 0/88/176)
 ----------------------------------------------------------------
-
-local ENUMS = {
-  leslieSpeed = { [0]="Stop", [86]="Slow", [172]="Fast" }, 
-  zero128 = { [0]="Off", [128]="On" },
-  sineSaw  = { [0]="Sine", [128]="Saw" },
-  zeroOne  = { [0]="Off", [1]="On" }, 
-  zero255  = { [0]="Off", [255]="On" }, 
-}
-
 -- FX1 (PARAM_227 type select, PARAM_228 sync, params 324/325/326 plus 345)
 local FX1_SPEC = {
   [0]  = { name="Bypass", params={
-    [1]={label="PARAM 1", kind="u8"},
-    [2]={label="PARAM 2", kind="u8"},
-    [3]={label="PARAM 3", kind="u8"},
+    [1]={label="PARAM 1"},
+    [2]={label="PARAM 2"},
+    [3]={label="PARAM 3"},
   }},
   [1]  = { name="BBD Delay",    syncParam=228, params={
-    [1]={label="Time",      kind="time_or_note"},
-    [2]={label="Feedback",  kind="u8"},
-    [3]={label="Cut off",   kind="u8"},
+    [1]={label="Time"},
+    [2]={label="Feedback"},
+    [3]={label="Cut off"},
   }},
   [2]  = { name="Stereo Delay", syncParam=228, params={
-    [1]={label="Time",      kind="time_or_note"},
-    [2]={label="Feedback",  kind="u8"},
-    [3]={label="Cut off",   kind="u8"},
+    [1]={label="Time"},
+    [2]={label="Feedback"},
+    [3]={label="Cut off"},
   }},
   [3]  = { name="Chorus", params={
-    [1]={label="Depth", kind="u8"},
-    [2]={label="Rate",  kind="u8"},
-    [3]={label="Tone",  kind="u8"},
+    [1]={label="Depth"},
+    [2]={label="Rate"},
+    [3]={label="Tone"},
   }},
   [4]  = { name="Phaser", params={
-    [1]={label="Depth",    kind="u8"},
-    [2]={label="Rate",     kind="u8"},
-    [3]={label="Feedback", kind="u8"},
+    [1]={label="Depth"},
+    [2]={label="Rate"},
+    [3]={label="Feedback"},
   }},
   [5]  = { name="Flanger", params={
-    [1]={label="Depth",    kind="u8"},
-    [2]={label="Rate",     kind="u8"},
-    [3]={label="Feedback", kind="u8"},
+    [1]={label="Depth"},
+    [2]={label="Rate"},
+    [3]={label="Feedback"},
   }},
   [6]  = { name="Distortion", params={
-    [1]={label="Gain Amount", kind="u8"},
-    [2]={label="Tone",        kind="u8"},
-    [3]={label="Output Level",kind="u8"},
+    [1]={label="Gain Amount", },
+    [2]={label="Tone",        },
+    [3]={label="Output Level",},
   }},
   [7]  = { name="Leslie Speaker", params={
-    [1]={label="Drive",    kind="u8"},
-    [2]={label="Speed",    kind="enum", enum=ENUMS.leslieSpeed}, -- 0/86/172
-    [3]={label="Distance", kind="u8"},
+    [1]={label="Drive",    },
+    [2]={label="Speed",    }, -- 0/86/172
+    [3]={label="Distance", },
   }},
   [8]  = { name="Ring Mod", params={
-    [1]={label="Frequency",          kind="u8"},
-    [2]={label="Pitch Track",        kind="enum", enum=ENUMS.zero128}, -- 0/128
-    [3]={label="Carrier",            kind="enum", enum=ENUMS.sineSaw}, -- 0/128
-    [4]={label="Pitch Track w/ Rel", kind="enum", enum=ENUMS.zeroOne}, -- 0/1
+    [1]={label="Frequency",          },
+    [2]={label="Pitch Track", }, -- 0/128
+    [3]={label="Carrier",     }, -- 0/128
+    [4]={label="Pitch Track w/ Rel", }, -- 0/1
   }},
 }
 
 -- FX2 (PARAM_231 type select, PARAM_232 sync, params 328/329/330 plus 348/349/350/466)
 local FX2_SPEC = {
   [0]  = { name="Bypass", params={
-    [1]={label="PARAM 1", kind="u8"},
-    [2]={label="PARAM 2", kind="u8"},
-    [3]={label="PARAM 3", kind="u8"},
+    [1]={label="PARAM 1", },
+    [2]={label="PARAM 2", },
+    [3]={label="PARAM 3", },
   }},
   [1]  = { name="BBD Delay",    syncParam=232, params={
-    [1]={label="Time",      kind="time_or_note"},
-    [2]={label="Feedback",  kind="u8"},
-    [3]={label="Cut off",   kind="u8"},
+    [1]={label="Time",      },
+    [2]={label="Feedback",  },
+    [3]={label="Cut off",   },
   }},
   [2]  = { name="Stereo Delay", syncParam=232, params={
-    [1]={label="Time",      kind="time_or_note"},
-    [2]={label="Feedback",  kind="u8"},
-    [3]={label="Cut off",   kind="u8"},
+    [1]={label="Time",      },
+    [2]={label="Feedback",  },
+    [3]={label="Cut off",   },
   }},
   [3]  = { name="Echoplex", params={
-    [1]={label="Time",         kind="u8"},
-    [2]={label="Feedback",     kind="u8"},
-    [3]={label="Wow&Flutter",  kind="u8"},
-    [4]={label="Rec Level",    kind="u8"},
-    [5]={label="Head Align",   kind="u8"},
-    [6]={label="Tape Hiss",    kind="enum", enum=ENUMS.zero255}, -- 0/255 
+    [1]={label="Time",         },
+    [2]={label="Feedback",     },
+    [3]={label="Wow&Flutter",  },
+    [4]={label="Rec Level",    },
+    [5]={label="Head Align",   },
+    [6]={label="Tape Hiss",    }, -- 0/255 
   }},
   [4]  = { name="Chorus", params={
-    [1]={label="Depth", kind="u8"},
-    [2]={label="Rate",  kind="u8"},
-    [3]={label="Tone",  kind="u8"},
+    [1]={label="Depth", },
+    [2]={label="Rate",  },
+    [3]={label="Tone",  },
   }},
   [5]  = { name="Phaser", params={
-    [1]={label="Depth",    kind="u8"},
-    [2]={label="Rate",     kind="u8"},
-    [3]={label="Feedback", kind="u8"},
+    [1]={label="Depth",    },
+    [2]={label="Rate",     },
+    [3]={label="Feedback", },
   }},
   [6]  = { name="Flanger", params={
-    [1]={label="Depth",    kind="u8"},
-    [2]={label="Rate",     kind="u8"},
-    [3]={label="Feedback", kind="u8"},
+    [1]={label="Depth",    },
+    [2]={label="Rate",     },
+    [3]={label="Feedback", },
   }},
   [7]  = { name="Distortion", params={
-    [1]={label="Gain Amount", kind="u8"},
-    [2]={label="Tone",        kind="u8"},
-    [3]={label="Output Level",kind="u8"},
+    [1]={label="Gain Amount", },
+    [2]={label="Tone",        },
+    [3]={label="Output Level",},
   }},
   [8]  = { name="Leslie Speaker", params={
-    [1]={label="Drive",    kind="u8"},
-    [2]={label="Speed",    kind="enum", enum=ENUMS.leslieSpeed}, -- 0/86/172
-    [3]={label="Distance", kind="u8"},
+    [1]={label="Drive",    },
+    [2]={label="Speed",    }, -- 0/86/172
+    [3]={label="Distance", },
   }},
   [9]  = { name="Ring Mod", params={
-    [1]={label="Frequency",          kind="u8"},
-    [2]={label="Pitch Track",        kind="enum", enum=ENUMS.zero128}, -- 0/128
-    [3]={label="Carrier",            kind="enum", enum=ENUMS.sineSaw}, -- 0/128
-    [4]={label="Pitch Track w/ Rel", kind="enum", enum=ENUMS.zeroOne}, -- 0/1
+    [1]={label="Frequency",          },
+    [2]={label="Pitch Track",        }, -- 0/128
+    [3]={label="Carrier",            }, -- 0/128
+    [4]={label="Pitch Track w/ Rel", }, -- 0/1
   }},
   [10] = { name="Room Reverb", params={
-    [1]={label="Reverb Time",  kind="u8"},
-    [2]={label="Cutoff",       kind="u8"},
-    [3]={label="Early Amount", kind="u8"},
+    [1]={label="Reverb Time",  },
+    [2]={label="Cutoff",       },
+    [3]={label="Early Amount", },
   }},
   [11] = { name="Hall Reverb", params={
-    [1]={label="Reverb Time",  kind="u8"},
-    [2]={label="Cutoff",       kind="u8"},
-    [3]={label="Early Amount", kind="u8"},
+    [1]={label="Reverb Time",  },
+    [2]={label="Cutoff",       },
+    [3]={label="Early Amount", },
   }},
   [12] = { name="Plate Reverb", params={
-    [1]={label="Reverb Time",  kind="u8"},
-    [2]={label="Cutoff",       kind="u8"},
-    [3]={label="Early Amount", kind="u8"},
+    [1]={label="Reverb Time",  },
+    [2]={label="Cutoff",       },
+    [3]={label="Early Amount", },
   }},
   [13] = { name="Shimmer Reverb", params={
-    [1]={label="HF Damping",   kind="u8"},
-    [2]={label="Pre Delay",    kind="u8"},
-    [3]={label="Feedback",     kind="u8"},
-    [4]={label="Bloom Speed",  kind="u8"},
-    [5]={label="Reverb Time",  kind="u8"},
-    [6]={label="Pitch Amount", kind="u8"},
-    [7]={label="LP/HP Cutoff", kind="u8"},
+    [1]={label="HF Damping",   },
+    [2]={label="Pre Delay",    },
+    [3]={label="Feedback",     },
+    [4]={label="Bloom Speed",  },
+    [5]={label="Reverb Time",  },
+    [6]={label="Pitch Amount", },
+    [7]={label="LP/HP Cutoff", },
   }},
 }
-
-----------------------------------------------------------------
--- Generic FX parameter formatter
-----------------------------------------------------------------
 
 -- Optional: map note-value index (0..12) to musical division labels
 -- Adjust to match 3rd Wave's exact order if needed.
@@ -647,80 +630,6 @@ local NOTE_VALUE_LABELS = {
   [0]="1/1", [1]="1/2", [2]="1/4", [3]="1/8", [4]="1/16", [5]="1/32",
   [6]="1/4T", [7]="1/8T", [8]="1/16T", [9]="1/4D", [10]="1/8D", [11]="1/16D", [12]="1/32D"
 }
-
-local function clamp(v, lo, hi)
-  if v < lo then return lo end
-  if v > hi then return hi end
-  return v
-end
-
--- spec      = FX1_SPEC or FX23_SPEC
--- fxType    = selected effect algorithm value
--- paramIdx  = 1..N parameter position
--- value     = midi value (0..255 typically)
--- syncValue = current sync switch value (0/1) for time_or_note params
-local function formatFxParam(spec, fxType, paramIdx, value, syncValue)
-  local fx = spec and spec[fxType]
-  if not fx or not fx.params then
-    return tostring(math.floor(value or 0))
-  end
-
-  local p = fx.params[paramIdx]
-  if not p then
-    return tostring(math.floor(value or 0))
-  end
-
-  local kind = p.kind or "u8"
-  local v = math.floor((value or 0) + 0.5)
-
-  if kind == "u8" then
-    return tostring(v)
-
-  elseif kind == "enum" then
-    if p.enum and p.enum[v] ~= nil then
-      return tostring(p.enum[v])
-    end
-    return tostring(v)
-
-  elseif kind == "time_or_note" then
-    if (syncValue or 0) == 1 then
-      v = clamp(v, 0, 12)
-      return NOTE_VALUE_LABELS[v] or ("N" .. tostring(v))
-    else
-      return tostring(v)
-    end
-  end
-
-  return tostring(v)
-end
-
--- Helpers to avoid repeated lookup code
-local function formatFx1Param(paramIdx, value)
-  local fxType = parameterMap.get(deviceId, PT_VIRTUAL, 227) or 0
-  local sync   = parameterMap.get(deviceId, PT_VIRTUAL, 228) or 0
-  return formatFxParam(FX1_SPEC, fxType, paramIdx, value, sync)
-end
-
-local function formatFx2Param(paramIdx, value)
-  local fxType = parameterMap.get(deviceId, PT_VIRTUAL, 231) or 0
-  local sync   = parameterMap.get(deviceId, PT_VIRTUAL, 232) or 0
-  return formatFxParam(FX2_SPEC, fxType, paramIdx, value, sync)
-end
-
--- FX1 params: 324,325,326,345
-function fx1Param1Format(valueObject, value) return formatFx1Param(1, value) end -- 324
-function fx1Param2Format(valueObject, value) return formatFx1Param(2, value) end -- 325
-function fx1Param3Format(valueObject, value) return formatFx1Param(3, value) end -- 326
-function fx1Param4Format(valueObject, value) return formatFx1Param(4, value) end -- 345
-
--- FX2 params: 328,329,330,348,349,350,466
-function fx2Param1Format(valueObject, value) return formatFx2Param(1, value) end -- 328
-function fx2Param2Format(valueObject, value) return formatFx2Param(2, value) end -- 329
-function fx2Param3Format(valueObject, value) return formatFx2Param(3, value) end -- 330
-function fx2Param4Format(valueObject, value) return formatFx2Param(4, value) end -- 348
-function fx2Param5Format(valueObject, value) return formatFx2Param(5, value) end -- 349
-function fx2Param6Format(valueObject, value) return formatFx2Param(6, value) end -- 350
-function fx2Param7Format(valueObject, value) return formatFx2Param(7, value) end -- 466
 
 local function updateFxParamNames(spec, fxType, ctrlIds, fallbackPrefix)
   local fx = spec and spec[fxType]
@@ -1223,8 +1132,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   if pNum == 227 then
     local fxType = parameterMap.get(deviceId, PT_VIRTUAL, 227) or 0
     updateFxParamNames(FX1_SPEC, fxType, FX1_CTRL_IDS, "Param")
-  end
-  if pNum == 231 then 
+  elseif pNum == 231 then 
     local fxType = parameterMap.get(deviceId, PT_VIRTUAL, 231) or 0
     updateFxParamNames(FX2_SPEC, fxType, FX2_CTRL_IDS, "Param")
   end

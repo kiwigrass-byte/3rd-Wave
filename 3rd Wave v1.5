@@ -25,6 +25,26 @@ local COMPARE_IT = 10039
 
 -- control ids
 local CTRL_PROG_NUMBER = 3
+local CTRL_PULSE  = {27,28,29}
+local CTRL_OFFSET = {30,31,32}
+local CTRL_FX2_PARAM = {318, 319, 320, 58}
+
+-- Visibility map by FX type value:
+local FX2_VIS = {
+  [13] = {true,  true,  true,  true }, -- shimmer reverb: show all
+  [10] = {true,  false, false, false}, -- room reverb: show first only
+  [11] = {true,  false, false, false}, -- hall reverb: show first only
+  [3]  = {true,  true,  true,  false}, -- echoplex delay: show first three
+}
+
+-- slot references
+local TARGET_SLOT = {4,16,28}
+
+-- page references
+local OSC_PAGE  = 2
+
+-- abbreviations of the bank names
+local bankTxt={"B1","B2","B3","B4","B5"} 
 
 -----------------  Device information -----------------------------
 local currentDevice  = devices.get(1)
@@ -46,7 +66,6 @@ local singleEdit, part1Edit, part2Edit = {}, {}, {}
 
 -- Guard to prevent onChange recursion during repaint
 local isApplyingCache = false
-
 
 ------------------------- initialize global variables
 -- UB-Xa-reported channels (source of truth when available)
@@ -95,7 +114,7 @@ for y = 1,5 do
     end
 end
 
--- helper to make sure bad control id numbers are not called
+-- ── Helper: safe controls.get() (pcall-wrapped for deleted/invalid IDs) ────────
 local function safeGet(id)
   local ok, c = pcall(controls.get, id)
   return ok and c or nil
@@ -437,15 +456,6 @@ function showSyncRateFx2(valueObject,value)
   for _,id in ipairs(CTRL_SYNC2) do controls.get(id):setVisible(visiBool) end 
 end
 
-local CTRL_FX2_PARAM = {318, 319, 320, 58}
--- Visibility map by FX type value:
--- each entry is {show318, show319, show320, show58}
-  local FX2_VIS = {
-    [13] = {true,  true,  true,  true }, -- shimmer reverb: show all
-    [10] = {true,  false, false, false}, -- room reverb: show first only
-    [11] = {true,  false, false, false}, -- hall reverb: show first only
-    [3]  = {true,  true,  true,  false}, -- echoplex delay: show first three
-  }
 function showFxParam2(valueObject, value)
   local vis = FX2_VIS[value]
   if not vis then
@@ -464,14 +474,7 @@ local function concat(t1, t2)
   return t
 end
 
--- ── Helper: safe controls.get() (pcall-wrapped for deleted/invalid IDs) ────────
-local function safeGet(id)
-  local ok, c = pcall(controls.get, id)
-  return ok and c or nil
-end
-
 function displayPatchName (valueObject, value)
-  local bankTxt={"B1","B2","B3","B4","B5"} -- abbreviations of the bank names
   local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER) + 1
   local patchName = nameBank[bankNum][value+1]
   local c = safeGet(CTRL_PROG_NUMBER); if c then c:setName(patchName) end
@@ -964,10 +967,6 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
     wtSyncing = true
     local s,tag = uiToSynth(midiValue)
     -- hide/show wavetable offset and pulse width
-    local CTRL_PULSE  = {27,28,29}
-    local CTRL_OFFSET = {30,31,32}
-    local TARGET_SLOT = {4,16,28}
-    local OSC_PAGE    = 2
     if s >= 256 and s <= 262 then
       controls.get(CTRL_PULSE[uiIdx]):setSlot(TARGET_SLOT[uiIdx], OSC_PAGE)
     else

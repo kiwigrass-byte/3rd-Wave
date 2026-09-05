@@ -434,10 +434,21 @@ function showSyncRateFx2(valueObject,value)
   local visiBool = value == 1 -- show sync rate for fx 2 if sync is on
   for _,id in ipairs(CTRL_SYNC2) do controls.get(id):setVisible(visiBool) end 
 end
-function showfxParam2(valueObject,value)
-  local CTRL_PARAM = {318,319,320,58}
-  local visiBool = (value == 13) -- showing param 4-7 if shimmer
-  for _,id in ipairs(CTRL_PARAM) do controls.get(id):setVisible(visiBool) end 
+function showfxParam2(valueObject, value)
+  local CTRL_PARAM = {318, 319, 320, 58}
+  -- Visibility map by FX type value:
+  -- each entry is {show318, show319, show320, show58}
+  local visibilityByValue = {
+    [13] = {true,  true,  true,  true }, -- shimmer reverb: show all
+    [10] = {true,  false, false, false}, -- room reverb: show first only
+    [11] = {true,  false, false, false}, -- hall reverb: show first only
+    [3]  = {true,  true,  true,  false}, -- echoplex delay: show first three
+  }
+  -- default if value not listed: hide all
+  local vis = visibilityByValue[value] or {false, false, false, false}
+  for i, id in ipairs(CTRL_PARAM) do
+    controls.get(id):setVisible(vis[i])
+  end
 end
 
 -- helper function to concatenate two arrays. Used for SysEx message construction

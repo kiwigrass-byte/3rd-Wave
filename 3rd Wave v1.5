@@ -35,13 +35,21 @@ local CTRL_LFO4_SYNC = 228
 local CTRL_FX1_SYNC = 324
 local CTRL_FX2_SYNC = 326
 
--- Default FX param controls -- for name updates. Other FX controls have hard coded names
-local CTRL_FX1_NAME_IDS = {311,312,313,428} 
-local CTRL_FX2_NAME_IDS = {315,316,317,318,319,320,58} 
-
 -- all FX param controls -- shown/hidden as needed
 local CTRL_FX1_IDS = {311,312,313,428, 430,431,432} 
-local CTRL_FX2_IDS = {315,316,317,318,319,320,58, 433,434,437,435,429,436,438} 
+local CTRL_FX2_IDS = {315,316,317,318,319,320,58, 433,434,437,435,436} 
+
+-- Visibility map for extra paramters by FX type value:
+local FX1_VIS = {
+  [7] = {true, false, true, false, true, false, false}, -- leslie 
+  [8] = {true, false, false, true, false, true, true }, -- ring mod
+}
+local FX2_VIS = {
+  [3] = {true, true, true, true, true, false, false, false, false, false, false, true}, -- echoplex  
+  [8] = {true, false, true, false, false, false, false, true, false, false, false, false}, -- leslie 
+  [9] = {true, false, false, false, false, false, false, false, true, true, true, false}, -- ring mod
+  [13] = {true, true, true, true, true, true, true, false, false, false, false, false}, -- shimmer reverb
+}
 
 -- slot references
 local TARGET_SLOT = {4,16,28}
@@ -499,6 +507,10 @@ local FX2_SPEC = {
   [13] = { name="SHIMMER REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="PITCH AMOUNT" }, [3]={label="LP/HP CUTOFF" }, [4]={label="BLOOM SPEED" }, [5]={label="HF DAMPING" }, [6]={label="PRE DELAY" }, [7]={label="FEEDBACK" }, }},
 }
 
+-- Default FX param controls -- for name updates. Other FX controls have hard coded names
+local CTRL_FX1_NAME_IDS = {311,312,313,428} 
+local CTRL_FX2_NAME_IDS = {315,316,317,318,319,320,58} 
+
 local function updateFxParamNames(spec, fxType, ctrlIds, fallbackPrefix)
   local fx = spec and spec[fxType]
   for i, ctrlId in ipairs(ctrlIds) do
@@ -512,20 +524,8 @@ local function refreshFxParamNames()
   local fx1Type = parameterMap.get(deviceId, PT_VIRTUAL, 227) or 0
   local fx2Type = parameterMap.get(deviceId, PT_VIRTUAL, 231) or 0
   updateFxParamNames(FX1_SPEC, fx1Type, CTRL_FX1_NAME_IDS, "Param")
-  updateFxParamNames(FX2_SPEC, fx2Type, CTRL_FX1_NAME_IDS, "Param")
+  updateFxParamNames(FX2_SPEC, fx2Type, CTRL_FX2_NAME_IDS, "Param")
 end
-
--- Visibility map for extra paramters by FX type value:
-local FX1_VIS = {
-  [7] = {true, false, true, false, true, false, false}, -- leslie: speed 
-  [8] = {true, false, false, true, false, true, true }, -- ring mod: pitch trk w/rel
-}
-local FX2_VIS = {
-  [3] = {true, true, true, true, true, false, false, false, false, false, false, false, true, false}, -- echoplex:  
-  [8] = {true, false, true, false, false, false, false, true, false, false, false, false, false, false}, -- leslie: speed 
-  [9] = {true, false, false, false, false, false, false, false, true, true, true, false, false, false }, -- ring mod: pitch trk w/rel
-  [13] = {true, true, true, true, true, true, true, false, false, false, false, false, false, false }, -- shimmer reverb
-}
 
 function showFx1Param(valueObject, value)
   local vis = FX1_VIS[value]
@@ -540,7 +540,7 @@ end
 function showFx2Param(valueObject, value)
   local vis = FX2_VIS[value]
   if not vis then
-    vis = {true,true,true,false,false,false,false,false, false,false,false,false,false,false}
+    vis = {true,true,true,false,false,false,false,false, false,false,false,false}
   end
   for i, id in ipairs(CTRL_FX2_IDS) do
     controls.get(id):setVisible(vis[i])
@@ -1041,7 +1041,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   if pNum == 227 then
     updateFxParamNames(FX1_SPEC, midiValue, CTRL_FX1_NAME_IDS, "Param")
   elseif pNum == 231 then 
-    updateFxParamNames(FX2_SPEC, midiValue, CTRL_FX1_NAME_IDS, "Param")
+    updateFxParamNames(FX2_SPEC, midiValue, CTRL_FX2_NAME_IDS, "Param")
   end
   -- UI fader changed -> convert to synth value
   local uiIdx = (pType == PT_VIRTUAL) and findIndex(WT_UI_PARAMS, pNum) or nil

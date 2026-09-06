@@ -2,11 +2,6 @@
 -- September 2026
 -- by @kiwigrass
 
-----------------------------------------------------------------------------------------------------------
--- This code requires that MIDI multitimbral mode is on so nrpn 0 is not sent in a patch dump. 
--- The nrpn mapping assumes it is starting with nrpn parameter 1                                                        
-----------------------------------------------------------------------------------------------------------
-
 -------------------------------- Declare Global Constants -----------------------------
 -- 3rd wave model id number: 0x01 for 24 voice products, 0x02 for 8 voice
 local MODEL_BYTE = 0x02
@@ -966,8 +961,8 @@ function midi.onSysex(midiInput, sysexBlock)
   -- 1773..1788 single block B
   -- 1789..2888 part 2 block
   if cmd == 0x02 then
-    -- if first param number MSB,LSB = 0 then multi mode is not on and nrpn parameter 0 has been received
-    if sysexBlock:peek(9) == 0 and sysexBlock:peek(10) == 0 then print("nrpn 0 was received - turn MIDI multitimbral mode on") return end 
+    -- if first param number MSB,LSB = 0 then nrpn param 0 has been received. Code not expecting that
+    if sysexBlock:peek(9) == 0 and sysexBlock:peek(10) == 0 then print("nrpn 0 was received. Aborting.") return end 
 
     local bankNum = sysexBlock:peek(7)
     local progNum = sysexBlock:peek(8)

@@ -50,6 +50,6 @@
 - If MIDI multitimbral mode is enabled (global setting) then nrpn 0 is not sent in a sysEx program dump since it is not needed. This code assumes that MIDI multitimbral mode is on! It is not robust to the mode being off because the nrpn mapping assumes it is starting at nrpn 1 (1st character of patch name)                                                 
 - A program consists of 32 nrpn parameters for patch name, 134 single parameters (assuming MIDI multitimbral mode is on), 275 part 1 parameters, 275 part 2 parameters. If the program has n sequencer patterns then there are are also n x 11 sequencer parameters.
 
-[3rd Wave MIDI CC + SysEx Spec v2.0.xlsx](https://github.com/user-attachments/files/31797211/3rd.Wave.MIDI.CC.%2B.SysEx.Spec.v2.0.xlsx)
+[3rd Wave MIDI CC + SysEx Spec v2.0.xlsx](https://github.com/user-attachments/files/31890242/3rd.Wave.MIDI.CC.%2B.SysEx.Spec.v2.0.xlsx)
 [3rd Wave MIDI CC + SysEx Spec v2.0.pdf](https://github.com/user-attachments/files/31797194/3rd.Wave.MIDI.CC.%2B.SysEx.Spec.v2.0.pdf)
 [readme_2_0.txt](https://github.com/user-attachments/files/31796956/readme_2_0.txt)

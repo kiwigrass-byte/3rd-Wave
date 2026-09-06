@@ -13,7 +13,7 @@
 - Turning the **PATCH NAMES** switch 'on' retrieves all the patch names from all banks. The button should toggle to an 'off' state after all 500 names are read. The patch number fader will then display the patch names when scrolling. This process takes a couple of minutes to complete. The patch names are then stored locally on the E1 and are loaded instantly whenever the E1 loads. If you later change teh saved patches on the 3rd Wave or move the preset to a different E1 slot then repeat the process.
 - Only parameters for one part can be viewed and edited a time. Use the **PART VIEW** control to switch between the parsed part 1 and part 2 parameter values. 
 - Use the **COMPARE** control to switch between an edited sound and the original patch sound. Very useful! 
-- Various buttons and lists on the first page mimic the selection option buttons on the 3rd Wave's front panel. 
+- Various buttons and list controls on the first page mimic the selection option buttons on the 3rd Wave's front panel. 
 - Controls are hidden when not in use.
 
 ----

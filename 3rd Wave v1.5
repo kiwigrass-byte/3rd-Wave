@@ -27,25 +27,6 @@ local COMPARE_IT = 10039
 local CTRL_PROG_NUMBER = 3
 local CTRL_PULSE  = {27,28,29}
 local CTRL_OFFSET = {30,31,32}
-local CTRL_FX1_PARAM = {428} -- param 4
-local CTRL_FX2_PARAM = {318, 319, 320, 58} -- params 4..7
-
--- visible param controls
-local FX1_CTRL_IDS = {311,312,313,428}                  -- params 1..4 => 324,325,326,345
-local FX2_CTRL_IDS = {315,316,317,318,319,320,58}       -- params 1..7 => 328,329,330,348,349,350,466
-
--- hidden discrete controls
-local CTRL_HIDDEN_FX1 = {430,431,432}
--- [1]=Leslie speed (0/86/172) for FX1 param2
--- [2]=Ring pitch track (0/128) for FX1 param2
--- [3]=Ring carrier (0/128) for FX1 param3
-
-local CTRL_HIDDEN_FX2 = {433,434,435,429,436}
--- [1]=Leslie speed (0/86/172) for FX2 param2
--- [2]=Ring pitch track (0/128) for FX2 param2
--- [3]=Ring carrier (0/128) for FX2 param3
--- [4]=Ring pitch track w/ rel (0/1) for FX2 param4
--- [5]=Echoplex tape hiss (0/255) for FX2 param6
 
 local CTRL_LFO1_SYNC = 226
 local CTRL_LFO2_SYNC = 329
@@ -54,24 +35,19 @@ local CTRL_LFO4_SYNC = 228
 local CTRL_FX1_SYNC = 324
 local CTRL_FX2_SYNC = 326
 
--- Visibility map for extra paramters by FX type value:
-local FX1_VIS = {
-  [8] = {true }, -- ring mod: 
-}
-local FX2_VIS = {
-  [3]  = {true,  true,  true,  false}, -- echoplex delay: show first three
-  [9] = {true,  false,  false,  false }, -- ring mod: show first
-  [13] = {true,  true,  true,  true }, -- shimmer reverb: show all
-}
+-- Default FX param controls -- for name updates. Other FX controls have hard coded names
+local CTRL_FX1_NAME_IDS = {311,312,313,428} 
+local CTRL_FX2_NAME_IDS = {315,316,317,318,319,320,58} 
+
+-- all FX param controls -- shown/hidden as needed
+local CTRL_FX1_IDS = {311,312,313,428, 430,431,432} 
+local CTRL_FX2_IDS = {315,316,317,318,319,320,58, 433,434,437,435,429,436,438} 
 
 -- slot references
 local TARGET_SLOT = {4,16,28}
-local TARGET_FX1SLOT = {4,4,5}
-local TARGET_FX2SLOT = {4,4,5,6,7}
 
 -- page references
 local OSC_PAGE  = 2
-local FX_PAGE  = 11
 
 -- abbreviations of the bank names
 local bankTxt={"B1","B2","B3","B4","B5"} 
@@ -497,30 +473,30 @@ local FX1_SPEC = {
   [1]  = { name="BBD DELAY", syncParam=228, params={ [1]={label="TIME"}, [2]={label="FEEDBACK"}, [3]={label="CUT OFF"},  }},
   [2]  = { name="STEREO DELAY", syncParam=228, params={ [1]={label="TIME"}, [2]={label="FEEDBACK"}, [3]={label="CUT OFF"},  }},
   [3]  = { name="CHORUS", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="TONE"}, }},
-  [4]  = { name="PHASER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACL"}, }},
+  [4]  = { name="PHASER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACK"}, }},
   [5]  = { name="FLANGER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACK"}, }},
-  [6]  = { name="DISTORTION", params={ [1]={label="GAIN AMOUNT", }, [2]={label="TONE", }, [3]={label="OUTPUT LEVEL",},  }},
-  [7]  = { name="LESLIE SPEAKER", params={ [1]={label="DRIVE", }, [2]={label="SPEED", }, [3]={label="DISTANCE", },  }},
-  [8]  = { name="RING MOD", params={ [1]={label="FREQ", }, [2]={label="PITCH TRACK", }, [3]={label="CARRIER",  }, [4]={label="PITCH TRK W/REL", },  }},
+  [6]  = { name="DISTORTION", params={ [1]={label="GAIN AMOUNT" }, [2]={label="TONE" }, [3]={label="OUTPUT LEVEL"},  }},
+  [7]  = { name="LESLIE SPEAKER", params={ [1]={label="DRIVE" }, [2]={label="SPEED" }, [3]={label="DISTANCE" },  }},
+  [8]  = { name="RING MOD", params={ [1]={label="FREQ" }, [2]={label="PITCH TRACK" }, [3]={label="CARRIER"  }, [4]={label="PITCH TRK W/REL" },  }},
 
 }
 
 -- FX2 (PARAM_231 type select, PARAM_232 sync, params 328/329/330 plus 348/349/350/466)
 local FX2_SPEC = {
-  [0]  = { name="Bypass", params={ [1]={label="PARAM 1", }, [2]={label="PARAM 2", }, [3]={label="PARAM 3", }, }},
-  [1]  = { name="BBD Delay", syncParam=232, params={ [1]={label="Time", }, [2]={label="Feedback",  }, [3]={label="Cut off",  }, }},
-  [2]  = { name="Stereo Delay", syncParam=232, params={ [1]={label="Time", }, [2]={label="Feedback",  }, [3]={label="Cut off",   }, }},
-  [3]  = { name="Echoplex", params={ [1]={label="Time", }, [2]={label="Feedback", }, [3]={label="Wow&Flutter",  }, [4]={label="Rec Level", }, [5]={label="Head Align", }, [6]={label="Tape Hiss",    },  }},
-  [4]  = { name="Chorus", params={ [1]={label="Depth", }, [2]={label="Rate", }, [3]={label="Tone",  }, }},
-  [5]  = { name="Phaser", params={ [1]={label="Depth", }, [2]={label="Rate", }, [3]={label="Feedback", },  }},
-  [6]  = { name="Flanger", params={ [1]={label="Depth", }, [2]={label="Rate", }, [3]={label="Feedback", },  }},
-  [7]  = { name="Distortion", params={ [1]={label="Gain Amount", }, [2]={label="Tone", }, [3]={label="Output Level",},  }},
-  [8]  = { name="LESLIE SPEAKER", params={ [1]={label="DRIVE", }, [2]={label="SPEED", }, [3]={label="DISTANCE", },  }},
-  [9]  = { name="RING MOD", params={ [1]={label="FREQ", }, [2]={label="PITCH TRACK", }, [3]={label="CARRIER",  }, [4]={label="PITCH TRK W/REL", },  }},
-  [10] = { name="Room Reverb", params={ [1]={label="Reverb Time", }, [2]={label="Cutoff", }, [3]={label="Early Amount", },  }},
-  [11] = { name="Hall Reverb", params={ [1]={label="Reverb Time", }, [2]={label="Cutoff", }, [3]={label="Early Amount", },  }},
-  [12] = { name="Plate Reverb", params={ [1]={label="Reverb Time", }, [2]={label="Cutoff", }, [3]={label="Early Amount", },  }},
-  [13] = { name="Shimmer Reverb", params={ [1]={label="HF Damping", }, [2]={label="Pre Delay", }, [3]={label="Feedback", }, [4]={label="Bloom Speed", }, [5]={label="Reverb Time", }, [6]={label="Pitch Amount", }, [7]={label="LP/HP Cutoff", },  }},
+  [0]  = { name="BYPASS", params={ [1]={label="PARAM 1"}, [2]={label="PARAM 2"}, [3]={label="PARAM 3"},  }},
+  [1]  = { name="BBD DELAY", syncParam=228, params={ [1]={label="TIME"}, [2]={label="FEEDBACK"}, [3]={label="CUT OFF"},  }},
+  [2]  = { name="STEREO DELAY", syncParam=228, params={ [1]={label="TIME"}, [2]={label="FEEDBACK"}, [3]={label="CUT OFF"},  }},
+  [3]  = { name="Echoplex", params={ [1]={label="TIME" }, [2]={label="FEEDBACK" }, [3]={label="WOW&FLUTTER"  }, [4]={label="REC LEVEL" }, [5]={label="HEAD ALIGN" }, [6]={label="TAPE HISS"  }, }},
+  [4]  = { name="CHORUS", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="TONE"}, }},
+  [5]  = { name="PHASER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACK"}, }},
+  [6]  = { name="FLANGER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACK"}, }},
+  [7]  = { name="DISTORTION", params={ [1]={label="GAIN AMOUNT" }, [2]={label="TONE" }, [3]={label="OUTPUT LEVEL"},  }},
+  [8]  = { name="LESLIE SPEAKER", params={ [1]={label="DRIVE" }, [2]={label="SPEED" }, [3]={label="DISTANCE" },  }},
+  [9]  = { name="RING MOD", params={ [1]={label="FREQ" }, [2]={label="PITCH TRACK" }, [3]={label="CARRIER"  }, [4]={label="PITCH TRK W/REL" },  }},
+  [10] = { name="ROOM REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="CUT OFF" }, [3]={label="EARLY AMOUNT" },  }},
+  [11] = { name="HALL REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="CUT OFF" }, [3]={label="EARLY AMOUNT" },  }},
+  [12] = { name="PLATE REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="CUT OFF" }, [3]={label="EARLY AMOUNT" },  }},
+  [13] = { name="SHIMMER REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="PITCH AMOUNT" }, [3]={label="LP/HP CUTOFF" }, [4]={label="BLOOM SPEED" }, [5]={label="HF DAMPING" }, [6]={label="PRE DELAY" }, [7]={label="FEEDBACK" }, }},
 }
 
 local function updateFxParamNames(spec, fxType, ctrlIds, fallbackPrefix)
@@ -535,34 +511,38 @@ end
 local function refreshFxParamNames()
   local fx1Type = parameterMap.get(deviceId, PT_VIRTUAL, 227) or 0
   local fx2Type = parameterMap.get(deviceId, PT_VIRTUAL, 231) or 0
-  updateFxParamNames(FX1_SPEC, fx1Type, FX1_CTRL_IDS, "Param")
-  updateFxParamNames(FX2_SPEC, fx2Type, FX2_CTRL_IDS, "Param")
+  updateFxParamNames(FX1_SPEC, fx1Type, CTRL_FX1_NAME_IDS, "Param")
+  updateFxParamNames(FX2_SPEC, fx2Type, CTRL_FX1_NAME_IDS, "Param")
 end
+
+-- Visibility map for extra paramters by FX type value:
+local FX1_VIS = {
+  [7] = {true, false, true, false, true, false, false}, -- leslie: speed 
+  [8] = {true, false, false, true, false, true, true }, -- ring mod: pitch trk w/rel
+}
+local FX2_VIS = {
+  [3] = {true, true, true, true, true, false, false, false, false, false, false, false, true, false}, -- echoplex:  
+  [8] = {true, false, true, false, false, false, false, true, false, false, false, false, false, false}, -- leslie: speed 
+  [9] = {true, false, false, false, false, false, false, false, true, true, true, false, false, false }, -- ring mod: pitch trk w/rel
+  [13] = {true, true, true, true, true, true, true, false, false, false, false, false, false, false }, -- shimmer reverb
+}
 
 function showFx1Param(valueObject, value)
   local vis = FX1_VIS[value]
   if not vis then
-    vis = {false}
+    vis = {true,true,true,false, false,false,false}
   end
-  for i, id in ipairs(CTRL_FX1_PARAM) do
+  for i, id in ipairs(CTRL_FX1_IDS) do
     controls.get(id):setVisible(vis[i])
-  end
-  controls.get(312):setSlot(4,FX_PAGE)
-  controls.get(313):setSlot(5,FX_PAGE)
-  if value == 7 then
-    controls.get(430):setSlot(4,FX_PAGE)
-  elseif value == 8 then 
-    controls.get(431):setSlot(4,FX_PAGE)
-    controls.get(432):setSlot(5,FX_PAGE)
   end
 end
 
 function showFx2Param(valueObject, value)
   local vis = FX2_VIS[value]
   if not vis then
-    vis = {false, false, false, false}
+    vis = {true,true,true,false,false,false,false,false, false,false,false,false,false,false}
   end
-  for i, id in ipairs(CTRL_FX2_PARAM) do
+  for i, id in ipairs(CTRL_FX2_IDS) do
     controls.get(id):setVisible(vis[i])
   end
 end
@@ -1059,9 +1039,9 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
 
   -- set the parameter names for each type of FX 1 and FX 2
   if pNum == 227 then
-    updateFxParamNames(FX1_SPEC, midiValue, FX1_CTRL_IDS, "Param")
+    updateFxParamNames(FX1_SPEC, midiValue, CTRL_FX1_NAME_IDS, "Param")
   elseif pNum == 231 then 
-    updateFxParamNames(FX2_SPEC, midiValue, FX2_CTRL_IDS, "Param")
+    updateFxParamNames(FX2_SPEC, midiValue, CTRL_FX1_NAME_IDS, "Param")
   end
   -- UI fader changed -> convert to synth value
   local uiIdx = (pType == PT_VIRTUAL) and findIndex(WT_UI_PARAMS, pNum) or nil

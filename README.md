@@ -3,9 +3,9 @@
 
 - Synth must be on at least OS 2.0 (August 2026)
 - The 8M is a 2-part synth. The preset might work with the 4-part 24M model, but only for up to 2 parts. To use the 24M change the MODEL_BYTE = 0x02 to 0x01 at the top of the Lua code.
-- The preset will not work as expected unless the MIDI multitimbral mode is turned on in the global settings.
+- The preset expects that MIDI multitimbral mode is turned on in the global settings.
 - The preset is built for the default factory P and U wavetables. Need to change wavetable names and adjust *count* in WT_SEGMENTS accordingly if different wavetables are used.   
-- I have the single and part 1 nrpn's sent on MIDI channel 1, and the part 2 nrpn's sending on channel 2. Change accordingly.
+- By default the preset has the single and part 1 nrpn's sent on MIDI channel 1, and the part 2 nrpn's sending on channel 2. Change accordingly.
 ---
 **What's in the preset**
 - Automatic parsing of a patch when a new patch is selected.
@@ -14,14 +14,14 @@
 - Only parameters for one part can be viewed and edited a time. Use the **PART VIEW** control to switch between the parsed part 1 and part 2 parameter values. 
 - Use the **COMPARE** control to switch between an edited sound and the original patch sound. Very useful! 
 - Various buttons and lists on the first page mimic the selection option buttons on the 3rd Wave's front panel. 
-- Controls darken or are hidden when not in use.
+- Controls are hidden when not in use.
 
 ----
 **What's not in the preset**
-- Preset parameters do not update when changed on the 3rd Wave. Look but don't touch while editing or the UI will get out of sync. 
+- Preset parameters do not update when changed on the 3rd Wave other than a program change. Don't edit on the 3rd Wave or the UI will get out of sync. 
 - No wavetable or multi-sample editing or management.
 - No sequencer pattern building.
-- No global settings are parsed. A few global parameters (dark blue) can be changed from the preset. 
+- No global settings are parsed. A couple of global parameters (dark blue) can be changed from the preset. 
 - No saving of edited patches from the UI.
 
 ----
@@ -35,7 +35,7 @@
 2. For nrpn 342 (volume), the scaling is 1.27 not 127
 3. For nrpn's 161-164 (LFO frequency) the range is 0-255. Not -127 to +127.
 4. There are 0-126 modulation destinations but the documentation refers to less than that: 0-113 for nrpn 35 (Pitch Wheel) and 0-117 elsewhere
-5. Doc says that nrpn 345 (effect 1 param 4) is not currently used. But they it is for ring mod. nrpn 348 is also used for ring mod in effect 2 param 4
+5. Doc says that nrpn 345 (fx effect 1 param 4) is not currently used. But it is used for ring mod. nrpn 348 is also used for ring mod in effect 2 param 4
 
 **NRPN Quirks:**
 1. Analog waveform display order is "Sawtooth","Square","Triangle","Sine","Super Saw","Pink Noise","Blue Noise". But that requires using nrpn 102-104 values in the order 256, 257, 262, 259, 258, 260, 261
@@ -43,7 +43,7 @@
 3. nrpn 424: selected osc button appears to only turn button light on/off
 4. nrpn 425: env 3 button appears to only turn button light on/off
 5. nrpn 426: env 4 button appears to only turn button light on/off
-6. the nrpn values for toggle and discrete FX parameters are not uniform - varying between 0/86/172, 0/1, 0/128, 0/255
+6. the nrpn values for some FX parameters are not consistent - 0/86/172 for leslie speed, and 0/1, 0/128, 0/255 are used for toggles
 
 **NRPN parameter information:**
 - If MIDI multitimbral mode is enabled (global setting) then nrpn 0 is not sent in a sysEx program dump since it is not needed. This code assumes that MIDI multitimbral mode is on! It is not robust to the mode being off because the nrpn mapping assumes it is starting at nrpn 1 (1st character of patch name)                                                 

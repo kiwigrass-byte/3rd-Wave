@@ -256,7 +256,7 @@ function pan(valueObject,value)
     controls.get(control):setColor (BLUE)
   elseif (value == 0) then
     side = " Center"
-    controls.get(control):setColor (WHITE)
+    controls.get(control):setColor (ORANGE)
   elseif (value > 0) then
     side = " R"
     controls.get(control):setColor (RED)
@@ -295,7 +295,7 @@ function fx2Param2(valueObject,value)
     end
     return (string.format ("%.1f", x))
   else
-    return value
+    return math.floor(value)
   end
 end
 

@@ -1,6 +1,7 @@
 
 # Groove Synthesis 3rd Wave 8M with patch parsing and comparison mode
 
+- 3rd wave version 1.5 is first public release
 - Synth must be on at least OS 2.0 (August 2026)
 - The 8M is a 2-part synth. The preset might work with the 4-part 24M model, but only for up to 2 parts. To use the 24M change the MODEL_BYTE = 0x02 to 0x01 at the top of the Lua code.
 - **IMPORTANT:** In addition to *MIDI param receive* set to CC+NRPN, the preset expects that *MIDI include part in NRPN* is turned on in the global settings.

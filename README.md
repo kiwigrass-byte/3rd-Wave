@@ -35,6 +35,7 @@
 2. For nrpn 342 (volume), the scaling is 1.27 not 127
 3. For nrpn's 161-164 (LFO frequency) the range is 0-255. Not -127 to +127.
 4. There are 0-126 modulation destinations but the documentation refers to less than that: 0-113 for nrpn 35 (Pitch Wheel) and 0-117 elsewhere
+5. Doc says that nrpn 345 (effect 1 param 4) is not currently used. But they it is for ring mod. nrpn 348 is also used for ring mod in effect 2 param 4
 
 **NRPN Quirks:**
 1. Analog waveform display order is "Sawtooth","Square","Triangle","Sine","Super Saw","Pink Noise","Blue Noise". But that requires using nrpn 102-104 values in the order 256, 257, 262, 259, 258, 260, 261
@@ -42,6 +43,7 @@
 3. nrpn 424: selected osc button appears to only turn button light on/off
 4. nrpn 425: env 3 button appears to only turn button light on/off
 5. nrpn 426: env 4 button appears to only turn button light on/off
+6. the nrpn values for toggle and discrete FX parameters are not uniform - varying between 0/86/172, 0/1, 0/128, 0/255
 
 **NRPN parameter information:**
 - If MIDI multitimbral mode is enabled (global setting) then nrpn 0 is not sent in a sysEx program dump since it is not needed. This code assumes that MIDI multitimbral mode is on! It is not robust to the mode being off because the nrpn mapping assumes it is starting at nrpn 1 (1st character of patch name)                                                 

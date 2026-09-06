@@ -3,14 +3,14 @@
 
 - Synth must be on at least OS 2.0 (August 2026)
 - The 8M is a 2-part synth. The preset might work with the 4-part 24M model, but only for up to 2 parts. To use the 24M change the MODEL_BYTE = 0x02 to 0x01 at the top of the Lua code.
-- The preset expects that MIDI multitimbral mode is turned on in the global settings.
+- **IMPORTANT:** In addition to *MIDI param receive* set to CC+NRPN, the preset expects that *MIDI include part in NRPN* is turned on in the global settings.
 - The preset is built for the default factory P and U wavetables. Need to change wavetable names and adjust *count* in WT_SEGMENTS accordingly if different wavetables are used.   
-- By default the preset has the single and part 1 nrpn's sent on MIDI channel 1, and the part 2 nrpn's sending on channel 2. Change accordingly.
+- The preset has the single and part 1 nrpn's sent on MIDI channel 1, and the part 2 nrpn's sending on channel 2. Change accordingly.
 ---
 **What's in the preset**
 - Automatic parsing of a patch when a new patch is selected.
 - The **PATCH SELECT** buttons send a program change message before loading the patch data and mapping to the UI controls. Parsing is not immediate because the sysEx dump is over 5k per patch. 
-- Turning the **PATCH NAMES** switch 'on' retrieves all the patch names from all banks. The button should toggle to an 'off' state after all 500 names are read. The patch number fader will then display the patch names when scrolling. This process takes a couple of minutes to complete. The patch names are then stored locally on the E1 and are loaded instantly whenever the E1 loads. If you change patches on the 3rd Wave or move the preset to a different slot then repeat the process.
+- Turning the **PATCH NAMES** switch 'on' retrieves all the patch names from all banks. The button should toggle to an 'off' state after all 500 names are read. The patch number fader will then display the patch names when scrolling. This process takes a couple of minutes to complete. The patch names are then stored locally on the E1 and are loaded instantly whenever the E1 loads. If you later change teh saved patches on the 3rd Wave or move the preset to a different E1 slot then repeat the process.
 - Only parameters for one part can be viewed and edited a time. Use the **PART VIEW** control to switch between the parsed part 1 and part 2 parameter values. 
 - Use the **COMPARE** control to switch between an edited sound and the original patch sound. Very useful! 
 - Various buttons and lists on the first page mimic the selection option buttons on the 3rd Wave's front panel. 

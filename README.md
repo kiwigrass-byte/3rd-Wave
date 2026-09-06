@@ -4,7 +4,7 @@
 - Synth must be on at least OS 2.0 (August 2026)
 - The 8M is a 2-part synth. The preset might work with the 4-part 24M model, but only for up to 2 parts. To use the 24M change the MODEL_BYTE = 0x02 to 0x01 at the top of the Lua code.
 - **IMPORTANT:** In addition to *MIDI param receive* set to CC+NRPN, the preset expects that *MIDI include part in NRPN* is turned on in the global settings.
-- The preset is built for the default factory P and U wavetables. Need to change wavetable names and adjust *count* in WT_SEGMENTS accordingly if different wavetables are used.   
+- The preset is built for the default factory P and U wavetables. Some adjustment would be needed for other wavetables, including wavetable names and adjusting *count* in WT_SEGMENTS accordingly.   
 - The preset has the single and part 1 nrpn's sent on MIDI channel 1, and the part 2 nrpn's sending on channel 2. Change accordingly.
 ---
 **What's in the preset**

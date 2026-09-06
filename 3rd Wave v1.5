@@ -2,10 +2,10 @@
 -- September 2026
 -- by @kiwigrass
 
------------------------------------------------------------------------------------------------------------------------------------
--- This code assumes that MIDI multitimbral mode is on (nrpn 0 is not sent in a program sysEx dump)!  
--- It is not robust to the mode being off because the nrpn mapping assumes it is starting at nrpn 1 (1st character of patch name)                                                        
------------------------------------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------------
+-- This code requires that MIDI multitimbral mode is on so nrpn 0 is not sent in a patch dump. 
+-- The nrpn mapping assumes it is starting with nrpn parameter 1                                                        
+----------------------------------------------------------------------------------------------------------
 
 -------------------------------- Declare Global Constants -----------------------------
 -- 3rd wave model id number: 0x01 for 24 voice products, 0x02 for 8 voice
@@ -24,6 +24,10 @@ local PART_SELECT = 10029 -- not nrpn 69 which displays part info on 3rd Wave's 
 local COMPARE_IT = 10039
 local FX1_TYPE = 227
 local FX2_TYPE = 231
+-- UI wavetable params (visible controls), one per oscillator
+local WT_UI_PARAMS    = {10040, 10041, 10042}
+-- Synth wavetable params (actual NRPN-mapped virtual params) stored on hidden page
+local WT_SYNTH_PARAMS = {102,   103,   104}
 
 -- control ids
 local CTRL_PROG_NUMBER = 3
@@ -41,7 +45,7 @@ local CTRL_FX2_SYNC = 326
 local CTRL_FX1_IDS = {311,312,313,428, 430,431,432} 
 local CTRL_FX2_IDS = {315,316,317,318,319,320,58, 433,434,437,435,436} 
 
--- Visibility map for extra paramters by FX type value:
+-- Visibility map for CTRL_FX1_IDS and CTRL_FX2_IDS:
 local FX1_VIS = {
   [7] = {true, false, true, false, true, false, false}, -- leslie 
   [8] = {true, false, false, true, false, true, true }, -- ring mod
@@ -53,13 +57,13 @@ local FX2_VIS = {
   [13] = {true, true, true, true, true, true, true, false, false, false, false, false}, -- shimmer reverb
 }
 
--- slot references
+-- slot reference for pulse width control
 local TARGET_SLOT = {4,16,28}
 
 -- page references
 local OSC_PAGE  = 2
 
--- abbreviations of the bank names
+-- abbreviations of bank names
 local bankTxt={"B1","B2","B3","B4","B5"} 
 
 -----------------  Device information -----------------------------
@@ -76,19 +80,6 @@ local part2Channel = devices.get(3):getChannel()
 -- events to track
 events.subscribe(PAGES | POTS)
 
--- Compare feature caches (key = parNum, value = 14-bit value)
-local singleBase, part1Base, part2Base = {}, {}, {}
-local singleEdit, part1Edit, part2Edit = {}, {}, {}
-
--- Guard to prevent onChange recursion during repaint
-local isApplyingCache = false
-
-------------------------- initialize global variables
--- UB-Xa-reported channels (source of truth when available)
-local wavePart1Ch = nil
-local wavePart2Ch = nil
-local channelsFromSynth = true
-
 -- populate the bottom RH screen information display on load
 local authorDate = "kiwigrass 2026" 
 info.setText(authorDate)
@@ -98,7 +89,19 @@ local amountTicks = 0
 -- Set timer tick rate (e.g., every 200 milliseconds) 
 timer.setPeriod(300) 
 
--- number of wavetables by type 
+-- Compare feature caches (key = parNum, value = 14-bit value)
+local singleBase, part1Base, part2Base = {}, {}, {}
+local singleEdit, part1Edit, part2Edit = {}, {}, {}
+
+-- Guard to prevent onChange recursion during repaint
+local isApplyingCache = false
+
+-- UB-Xa-reported channels (source of truth when available)
+local wavePart1Ch = nil
+local wavePart2Ch = nil
+local channelsFromSynth = true
+
+-- initialize number of wavetables by type 
 local ppgNumber = 0
 local userNumber = 0
 local analogNumber = 0
@@ -302,10 +305,6 @@ function fx2Param2(valueObject,value)
 end
 
 ----------------- create virtual control for wavetable control so control has no dead spots wher ethere aren't wavetables ----------------
--- UI params (visible controls), one per oscillator
-local WT_UI_PARAMS    = {10040, 10041, 10042}
--- Synth wavetable params (actual NRPN-mapped virtual params) stored on hidden page
-local WT_SYNTH_PARAMS = {102,   103,   104}
 local wtSyncing = false
 local wtLastUi = nil
 local wtLastSynth = nil
@@ -967,7 +966,10 @@ function midi.onSysex(midiInput, sysexBlock)
   -- 1773..1788 single block B
   -- 1789..2888 part 2 block
   if cmd == 0x02 then
-    local bankNum = sysexBlock:peek(7)+1
+    -- if first param number MSB,LSB = 0 then multi mode is not on and nrpn parameter 0 has been received
+    if sysexBlock:peek(9) == 0 and sysexBlock:peek(10) == 0 then print("nrpn 0 was received - turn MIDI multitimbral mode on") return end 
+
+    local bankNum = sysexBlock:peek(7)
     local progNum = sysexBlock:peek(8)
     print( "Patch data for bank ".. math.floor(bankNum)..", program " ..math.floor(progNum).." received" )
 
@@ -1048,8 +1050,6 @@ end
 --------------------------------------------------------------------------------
 -- Parameter change callback (UI -> synth and cache)
 --------------------------------------------------------------------------------
-
-
 function parameterMap.onChange(valueObjects, origin, midiValue)
   if (origin ~= INTERNAL) then return end
 

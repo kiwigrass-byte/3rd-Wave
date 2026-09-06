@@ -22,6 +22,8 @@ local SELECT_IT = 10035
 local SELECT_PLUS = 10036
 local PART_SELECT = 10029 -- not nrpn 69 which displays part info on 3rd Wave's screen
 local COMPARE_IT = 10039
+local FX1_TYPE = 227
+local FX2_TYPE = 231
 
 -- control ids
 local CTRL_PROG_NUMBER = 3
@@ -280,6 +282,24 @@ function displayBpm(valueObject,value)
    return(math.floor(value) .. " bpm")
 end
 
+-- value function for FX2 param 2 when type = shimmer reverb (-12 .. + 12)
+function fx2Param2(valueObject,value)
+  local fx2Num = parameterMap.get(deviceId, PT_VIRTUAL, FX2_TYPE)
+  if fx2Num == 13 then -- shimmer reverb
+    local control = valueObject:getControl():getId()
+    local x = (24*value/255 - 12)
+    if (x < 0 ) then 
+      controls.get(control):setColor (BLUE)
+    elseif (x == 0) then
+      controls.get(control):setColor (WHITE)
+    elseif (x > 0) then
+      controls.get(control):setColor (RED)
+    end
+    return (string.format ("%.1f", x))
+  else
+    return value
+  end
+end
 
 ----------------- create virtual control for wavetable control so control has no dead spots wher ethere aren't wavetables ----------------
 -- UI params (visible controls), one per oscillator
@@ -521,8 +541,8 @@ local function updateFxParamNames(spec, fxType, ctrlIds, fallbackPrefix)
 end
 
 local function refreshFxParamNames()
-  local fx1Type = parameterMap.get(deviceId, PT_VIRTUAL, 227) or 0
-  local fx2Type = parameterMap.get(deviceId, PT_VIRTUAL, 231) or 0
+  local fx1Type = parameterMap.get(deviceId, PT_VIRTUAL, FX1_TYPE) or 0
+  local fx2Type = parameterMap.get(deviceId, PT_VIRTUAL, FX2_TYPE) or 0
   updateFxParamNames(FX1_SPEC, fx1Type, CTRL_FX1_NAME_IDS, "Param")
   updateFxParamNames(FX2_SPEC, fx2Type, CTRL_FX2_NAME_IDS, "Param")
 end
@@ -1038,9 +1058,9 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   local pType = msg:getType()
 
   -- set the parameter names for each type of FX 1 and FX 2
-  if pNum == 227 then
+  if pNum == FX1_TYPE then
     updateFxParamNames(FX1_SPEC, midiValue, CTRL_FX1_NAME_IDS, "Param")
-  elseif pNum == 231 then 
+  elseif pNum == FX2_TYPE then 
     updateFxParamNames(FX2_SPEC, midiValue, CTRL_FX2_NAME_IDS, "Param")
   end
   -- UI fader changed -> convert to synth value

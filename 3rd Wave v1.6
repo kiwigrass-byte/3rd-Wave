@@ -519,6 +519,7 @@ function onPartSelectChanged(valueObject, value)
   refreshUnisonVisibility()
   -- pass 2: next timer tick (after map settles)
   refreshUnisonPending = true
+--[[
  -- toggle unison switch visibility by part
   local showPart1 = (value == 0)
   local showPart2 = (value == 1)
@@ -530,7 +531,7 @@ function onPartSelectChanged(valueObject, value)
   refreshUnisonVisibility()
   -- pass 2: next timer tick (after map settles)
   refreshUnisonPending = true
-
+]]
   if midiChannel == nil then return end
   device:setChannel(midiChannel)
   channel = device:getChannel()

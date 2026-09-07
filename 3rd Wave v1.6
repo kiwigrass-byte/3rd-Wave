@@ -262,7 +262,6 @@ end
 
 function preset.onReady()
   getWaveCount(nil,1) -- number of wave tables
-  refreshUnisonVisibility()
 end
 
 -- format part pan
@@ -749,7 +748,6 @@ local SCAN_HEADER = concat(SYSEX_HEADER,{0x10})
 
 -- Timer callback (called by Electra One runtime)
 function timer.onTick()
-
   if not patchScanState.isRunning then return end
   -- Send the sysex request for current bank/patch
   local msg = concat(SCAN_HEADER, {patchScanState.bank, patchScanState.patch})
@@ -1114,10 +1112,10 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   local pNum = msg:getParameterNumber()
   local pType = msg:getType()
 
-  if parType == PT_VIRTUAL and (
-      parameterNumber == PART_SELECT or
-      parameterNumber == UNISON1_PARAM or
-      parameterNumber == UNISON2_PARAM
+  if pType == PT_VIRTUAL and (
+      pNum == PART_SELECT or
+      pNum == UNISON1_PARAM or
+      pNum == UNISON2_PARAM
     ) then
     refreshUnisonVisibility()
   end

@@ -9,7 +9,7 @@ local MODEL_BYTE = 0x02
 -- header for 3rd Wave sysEx messages (will recognize either model id byte)
 local SYSEX_HEADER = {0x00,0x02,0x4A,0x02}
 
--- virtual parameter numbers
+------------ virtual parameter numbers ----------------
 local BANK_NUMBER = 10032
 local PROG_NUMBER = 10033
 local SELECT_MINUS = 10034
@@ -27,7 +27,7 @@ local WT_SYNTH_PARAMS = {102,   103,   104}
 local UNISON1_PARAM = 397
 local UNISON2_PARAM = 398
 
--- ctrl ids
+-------------- ctrl ids ---------------------
 -- program number ctrl id
 local CTRL_PROG_NUMBER = 3
 -- osc control ids
@@ -63,20 +63,21 @@ local FX2_VIS = {
   [13] = {true, true, true, true, true, true, true, false, false, false, false, false}, -- shimmer reverb
 }
 
--- slot reference for pulse width control
+-- slot reference for pulse width control ---
 local TARGET_SLOT = {4,16,28}
 -- slot reference for unison controls
 local SLOT_UNISON1 = {[60]=19,[66]=20,[61]=21,[63]=22,[46]=23}
 local SLOT_UNISON2 = {[412]=19,[413]=20,[414]=21,[415]=22,[416]=23}
 
--- page references
+-- page references ---
 local CTRL_PAGE = 1
 local OSC_PAGE  = 2
 
--- abbreviations of bank names
+-- other constants --
 local bankTxt={"B1","B2","B3","B4","B5"} 
+local authorDate = "kiwigrass 2026" 
 
------------------  Device information -----------------------------
+--  Device information 
 local currentDevice  = devices.get(1)
 local deviceId = currentDevice:getId()
 local channel = currentDevice:getChannel ()
@@ -91,7 +92,6 @@ local part2Channel = devices.get(3):getChannel()
 events.subscribe(PAGES | POTS)
 
 -- populate the bottom RH screen information display on load
-local authorDate = "kiwigrass 2026" 
 info.setText(authorDate)
 
 -- Tracks how many ticks have passed for the timer.onTick function
@@ -143,13 +143,13 @@ for y = 1,5 do
     end
 end
 
--- ── Helper: safe controls.get() (pcall-wrapped for deleted/invalid IDs) ────────
+-- Helper: safe controls.get() (pcall-wrapped for deleted/invalid IDs) ────────
 local function safeGet(id)
   local ok, c = pcall(controls.get, id)
   return ok and c or nil
 end
 
--- helper function to concatenate two arrays. Used for SysEx message construction
+-- Helper: concatenate two arrays. Used for SysEx message construction
 local function concat(t1, t2)
   local t = {}
   for i=1,#t1 do t[#t+1] = t1[i] end
@@ -260,11 +260,13 @@ function preset.onLoad()
   pages.display(1)
   refreshUnisonVisibility()
 end
+
 -- called after loading 
 function preset.onReady()
   getWaveCount(nil,1) -- number of wave tables
 end
 
+----------UI formatter functions -----------------
 -- format part pan
 function pan(valueObject,value)
   local control = valueObject:getControl():getId()
@@ -297,7 +299,7 @@ function displayBpm(valueObject,value)
    return(math.floor(value) .. " bpm")
 end
 
--- value function for FX2 param 2 when type = shimmer reverb (-12 .. + 12)
+-- FX2 param 2 when type = shimmer reverb (-12 .. + 12)
 function fx2Param2(valueObject,value)
   local fx2Num = parameterMap.get(deviceId, PT_VIRTUAL, FX2_TYPE)
   if fx2Num == 13 then -- shimmer reverb
@@ -465,7 +467,6 @@ function source(valueObject,value)
     controls.get(control):setName (SOURCE[value])
 end
 
-
 -- control visibility of part 1/2 unison params
 local function setGroupVisible(ids, visible, color, slotMap)
   for _, id in ipairs(ids) do
@@ -481,13 +482,10 @@ function refreshUnisonVisibility()
   local part = parameterMap.get(deviceId, PT_VIRTUAL, PART_SELECT) or 1
   local p1On = (parameterMap.get(deviceId, PT_VIRTUAL, UNISON1_PARAM) or 0) == 1
   local p2On = (parameterMap.get(deviceId, PT_VIRTUAL, UNISON2_PARAM) or 0) == 1
-
   controls.get(UNISON1_CTRL):setVisible(part == 1)
   controls.get(UNISON2_CTRL):setVisible(part == 2)
-
   setGroupVisible(CTRL_UNISON1, false, BLUE,  nil)
   setGroupVisible(CTRL_UNISON2, false, GREEN, nil)
-
   if part == 1 and p1On then
     setGroupVisible(CTRL_UNISON1, true, BLUE, SLOT_UNISON1)
   elseif part == 2 and p2On then
@@ -512,7 +510,6 @@ function showSyncRate4(valueObject,value)
   local visiBool = value == 1 -- show sync rate for lfo 4 if sync is on
   controls.get(CTRL_LFO4_SYNC):setVisible(visiBool) 
 end
-
 function showSyncRateFx1(valueObject,value)
   local visiBool = value == 1 -- show sync rate for fx 1 if sync is on
   controls.get(CTRL_FX1_SYNC):setVisible(visiBool) 

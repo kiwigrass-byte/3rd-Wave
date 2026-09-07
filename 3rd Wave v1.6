@@ -1041,6 +1041,7 @@ function midi.onSysex(midiInput, sysexBlock)
     repaintFromVisibleCaches()
     syncWtUiFromSynthParams()
     refreshFxParamNames()
+    refreshUnisonVisibility()
 
   -- edit buffer data received (doesn't contain bank byte or program number byte)
   -- cmd 0x03 edit buffer dump byte map:

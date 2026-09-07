@@ -23,7 +23,11 @@ local FX2_TYPE = 231
 local WT_UI_PARAMS    = {10040, 10041, 10042}
 -- Synth wavetable params (actual NRPN-mapped virtual params) stored on hidden page
 local WT_SYNTH_PARAMS = {102,   103,   104}
+-- toggle for part1 and part 2 unison modes
+local UNISON1_PARAM = 397
+local UNISON2_PARAM = 398
 
+-- ctrl ids
 -- program number ctrl id
 local CTRL_PROG_NUMBER = 3
 -- osc control ids
@@ -39,6 +43,9 @@ local CTRL_FX2_SYNC = 326
 -- unison control (exc switch) ids
 local CTRL_UNISON1 = {60,66,61,63,46}
 local CTRL_UNISON2 = {412,413,414,415,416}
+-- unison toggle control ids
+local UNISON1_CTRL  = 59
+local UNISON2_CTRL  = 411
 
 -- all FX param control ids -- shown/hidden as needed
 local CTRL_FX1_IDS = {311,312,313,428, 430,431,432} 
@@ -113,20 +120,8 @@ local sampleNumber = 0
 -- 3rd Wave-reported channel (source of truth when available)
 local midiChannel = nil
 
--- assign MIDI channel based on 3rd Wave
-function assignChannel(valueObject, value)
- -- toggle unison switch visibility by part
-  local showPart1 = (value == 0)
-  local showPart2 = (value == 1)
-  -- part unison switch IDs:
-  controls.get(59):setVisible(showPart1)
-  controls.get(411):setVisible(showPart2)
-
-  -- pass 1: immediate
-  refreshUnisonVisibility()
-  -- pass 2: next timer tick (after map settles)
-  refreshUnisonPending = true
-
+-- bound to PART_SELECT param
+function onPartSelectChanged(valueObject, value)
   if midiChannel == nil then return end
   device:setChannel(midiChannel)
   channel = device:getChannel()
@@ -262,10 +257,12 @@ end
 function preset.onLoad()
   loadNameBank()  -- restore cached patch names first
   pages.display(1)
+  refreshUnisonVisibility()
 end
 
 function preset.onReady()
   getWaveCount(nil,1) -- number of wave tables
+  refreshUnisonVisibility()
 end
 
 -- format part pan
@@ -467,11 +464,6 @@ function source(valueObject,value)
     controls.get(control):setName (SOURCE[value])
 end
 
-local UNISON1_PARAM = 397
-local UNISON2_PARAM = 398
-local UNISON1_CTRL  = 59
-local UNISON2_CTRL  = 411
-
 -- one-shot flag for next timer tick
 local refreshUnisonPending = false
 
@@ -512,33 +504,6 @@ end
 function moveUnison2(valueObject, value)
   refreshUnisonVisibility()
 end
-
--- bound to PART_SELECT param
-function onPartSelectChanged(valueObject, value)
-  -- pass 1: immediate
-  refreshUnisonVisibility()
-  -- pass 2: next timer tick (after map settles)
-  refreshUnisonPending = true
---[[
- -- toggle unison switch visibility by part
-  local showPart1 = (value == 0)
-  local showPart2 = (value == 1)
-  -- part unison switch IDs:
-  controls.get(59):setVisible(showPart1)
-  controls.get(411):setVisible(showPart2)
-
-  -- pass 1: immediate
-  refreshUnisonVisibility()
-  -- pass 2: next timer tick (after map settles)
-  refreshUnisonPending = true
-]]
-  if midiChannel == nil then return end
-  device:setChannel(midiChannel)
-  channel = device:getChannel()
-  deviceId = device:getId()
-  port = device:getPort()
-end
-
 
 function showSyncRate1(valueObject,value)
   local visiBool = value == 1 -- show sync rate for lfo 1 if sync is on
@@ -784,10 +749,6 @@ local SCAN_HEADER = concat(SYSEX_HEADER,{0x10})
 
 -- Timer callback (called by Electra One runtime)
 function timer.onTick()
-  if refreshUnisonPending then
-    refreshUnisonPending = false
-    refreshUnisonVisibility()
-  end
 
   if not patchScanState.isRunning then return end
   -- Send the sysex request for current bank/patch
@@ -1152,6 +1113,14 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   local msg = valueObjects[1]:getMessage()
   local pNum = msg:getParameterNumber()
   local pType = msg:getType()
+
+  if parType == PT_VIRTUAL and (
+      parameterNumber == PART_SELECT or
+      parameterNumber == UNISON1_PARAM or
+      parameterNumber == UNISON2_PARAM
+    ) then
+    refreshUnisonVisibility()
+  end
 
   -- set the parameter names for each type of FX 1 and FX 2
   if pNum == FX1_TYPE then

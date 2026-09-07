@@ -24,19 +24,23 @@ local WT_UI_PARAMS    = {10040, 10041, 10042}
 -- Synth wavetable params (actual NRPN-mapped virtual params) stored on hidden page
 local WT_SYNTH_PARAMS = {102,   103,   104}
 
--- control ids
+-- program number ctrl id
 local CTRL_PROG_NUMBER = 3
+-- osc control ids
 local CTRL_PULSE  = {27,28,29}
 local CTRL_OFFSET = {30,31,32}
-
+-- sync control ids
 local CTRL_LFO1_SYNC = 226
 local CTRL_LFO2_SYNC = 329
 local CTRL_LFO3_SYNC = 227
 local CTRL_LFO4_SYNC = 228
 local CTRL_FX1_SYNC = 324
 local CTRL_FX2_SYNC = 326
+-- unison control (exc switch) ids
+local CTRL_UNISON1 = {60,66,61,63,46}
+local CTRL_UNISON2 = {412,413,414,415,416}
 
--- all FX param controls -- shown/hidden as needed
+-- all FX param control ids -- shown/hidden as needed
 local CTRL_FX1_IDS = {311,312,313,428, 430,431,432} 
 local CTRL_FX2_IDS = {315,316,317,318,319,320,58, 433,434,437,435,436} 
 
@@ -54,8 +58,12 @@ local FX2_VIS = {
 
 -- slot reference for pulse width control
 local TARGET_SLOT = {4,16,28}
+-- slot reference for unison controls
+local SLOT_UNISON1 = {[60]=19,[66]=20,[61]=21,[63]=22,[46]=23}
+local SLOT_UNISON2 = {[412]=19,[413]=20,[414]=21,[415]=22,[416]=23}
 
 -- page references
+local CTRL_PAGE = 1
 local OSC_PAGE  = 2
 
 -- abbreviations of bank names
@@ -107,16 +115,23 @@ local midiChannel = nil
 
 -- assign MIDI channel based on 3rd Wave
 function assignChannel(valueObject, value)
+ -- toggle unison switch visibility by part
+  local showPart1 = (value == 0)
+  local showPart2 = (value == 1)
+  -- part unison switch IDs:
+  controls.get(59):setVisible(showPart1)
+  controls.get(411):setVisible(showPart2)
+
+  -- pass 1: immediate
+  refreshUnisonVisibility()
+  -- pass 2: next timer tick (after map settles)
+  refreshUnisonPending = true
+
   if midiChannel == nil then return end
   device:setChannel(midiChannel)
   channel = device:getChannel()
   deviceId = device:getId()
   port = device:getPort()
-  if value == 1 then 
-    controls.get(59):setVisible(true) controls.get(411):setVisible(false) 
-  elseif value == 2 then
-    controls.get(59):setVisible(false) controls.get(411):setVisible(true) 
-  end
 end
 
 -- initialize sysEx data
@@ -452,32 +467,77 @@ function source(valueObject,value)
     controls.get(control):setName (SOURCE[value])
 end
 
--- value functions for showing/hiding unison controls 
-local CTRL_UNISON1 = {60,66,61,63,46}
-local CTRL_UNISON2 = {412,413,414,415,416}
-local SLOT_UNISON1 = {[60]=19,[66]=20,[61]=21,[63]=22,[46]=23}
-local SLOT_UNISON2 = {[412]=19,[413]=20,[414]=21,[415]=22,[416]=23}
-local CTRL_PAGE = 1
+local UNISON1_PARAM = 397
+local UNISON2_PARAM = 398
+local UNISON1_CTRL  = 59
+local UNISON2_CTRL  = 411
 
-function moveUnison1(valueObject,value)
-  local part = parameterMap.get(deviceId, PT_VIRTUAL, PART_SELECT) -- part view toogle parameter
-  if part == 2 then return end
-  local visiBool = value == 1 -- show unison controls only if in unsion mode
-  if value == 1 and part == 1 then
-    for _,id in ipairs(CTRL_UNISON1) do controls.get(id):setSlot(SLOT_UNISON1[id],CTRL_PAGE) end 
+-- one-shot flag for next timer tick
+local refreshUnisonPending = false
+
+local function setGroupVisible(ids, visible, color, slotMap)
+  for _, id in ipairs(ids) do
+    if color then controls.get(id):setColor(color) end
+    if visible and slotMap and slotMap[id] then
+      controls.get(id):setSlot(slotMap[id], CTRL_PAGE)
+    end
+    controls.get(id):setVisible(visible)
   end
-  for _,id in ipairs(CTRL_UNISON1) do controls.get(id):setColor(BLUE) controls.get(id):setVisible(visiBool) end
 end
 
-function moveUnison2(valueObject,value)
-  local part = parameterMap.get(deviceId, PT_VIRTUAL, PART_SELECT) -- part view toogle parameter
-  if part == 1 then return end
-  local visiBool = value == 1 -- show unison controls only if in unsion mode
-  if value == 1 and part == 2 then
-    for _,id in ipairs(CTRL_UNISON2) do controls.get(id):setSlot(SLOT_UNISON2[id],CTRL_PAGE) end 
+function refreshUnisonVisibility()
+  local part = parameterMap.get(deviceId, PT_VIRTUAL, PART_SELECT) or 1
+  local p1On = (parameterMap.get(deviceId, PT_VIRTUAL, UNISON1_PARAM) or 0) == 1
+  local p2On = (parameterMap.get(deviceId, PT_VIRTUAL, UNISON2_PARAM) or 0) == 1
+
+  controls.get(UNISON1_CTRL):setVisible(part == 1)
+  controls.get(UNISON2_CTRL):setVisible(part == 2)
+
+  setGroupVisible(CTRL_UNISON1, false, BLUE,  nil)
+  setGroupVisible(CTRL_UNISON2, false, GREEN, nil)
+
+  if part == 1 and p1On then
+    setGroupVisible(CTRL_UNISON1, true, BLUE, SLOT_UNISON1)
+  elseif part == 2 and p2On then
+    setGroupVisible(CTRL_UNISON2, true, GREEN, SLOT_UNISON2)
   end
-  for _,id in ipairs(CTRL_UNISON2) do controls.get(id):setColor(GREEN) controls.get(id):setVisible(visiBool) end 
 end
+
+-- bound to param 397
+function moveUnison1(valueObject, value)
+  refreshUnisonVisibility()
+end
+
+-- bound to param 398
+function moveUnison2(valueObject, value)
+  refreshUnisonVisibility()
+end
+
+-- bound to PART_SELECT param
+function onPartSelectChanged(valueObject, value)
+  -- pass 1: immediate
+  refreshUnisonVisibility()
+  -- pass 2: next timer tick (after map settles)
+  refreshUnisonPending = true
+ -- toggle unison switch visibility by part
+  local showPart1 = (value == 0)
+  local showPart2 = (value == 1)
+  -- part unison switch IDs:
+  controls.get(59):setVisible(showPart1)
+  controls.get(411):setVisible(showPart2)
+
+  -- pass 1: immediate
+  refreshUnisonVisibility()
+  -- pass 2: next timer tick (after map settles)
+  refreshUnisonPending = true
+
+  if midiChannel == nil then return end
+  device:setChannel(midiChannel)
+  channel = device:getChannel()
+  deviceId = device:getId()
+  port = device:getPort()
+end
+
 
 function showSyncRate1(valueObject,value)
   local visiBool = value == 1 -- show sync rate for lfo 1 if sync is on
@@ -723,6 +783,11 @@ local SCAN_HEADER = concat(SYSEX_HEADER,{0x10})
 
 -- Timer callback (called by Electra One runtime)
 function timer.onTick()
+  if refreshUnisonPending then
+    refreshUnisonPending = false
+    refreshUnisonVisibility()
+  end
+
   if not patchScanState.isRunning then return end
   -- Send the sysex request for current bank/patch
   local msg = concat(SCAN_HEADER, {patchScanState.bank, patchScanState.patch})

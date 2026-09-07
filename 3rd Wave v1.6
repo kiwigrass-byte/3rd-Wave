@@ -254,12 +254,13 @@ local function flushNameBankIfDirty()
   end
 end
 
+-- called when preset first loads
 function preset.onLoad()
   loadNameBank()  -- restore cached patch names first
   pages.display(1)
   refreshUnisonVisibility()
 end
-
+-- called after loading 
 function preset.onReady()
   getWaveCount(nil,1) -- number of wave tables
 end

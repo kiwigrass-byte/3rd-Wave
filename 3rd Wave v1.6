@@ -401,6 +401,7 @@ local WAVETABLE = {
   [512]="Drums Vinyl Subs&Snares",[513]="Drums Vinyl Cymbals&Toms",[514]="TubeBell",[515]="Marine vocal 3",[516]="mT Kit",[517]="Kalimba",[518]="CowbellNote",[519]="Electric Bass EQ",[520]="808 Kit",[521]="Hanger Drums",[522]="S10"
 }
 
+-- update names of wavetable controls
 function waveTableName(valueObject, value)
   local control = valueObject:getControl():getId()
   local u = math.floor((value or 0) + 0.5)
@@ -419,7 +420,7 @@ function waveTableName(valueObject, value)
   end
   controls.get(control):setName(name)
 end
-
+-- update values of UI wavetable controls
 function waveTableFormat(valueObject, value)
   local u = math.floor((value or 0) + 0.5)
   local s,tag = uiToSynth(u) -- map UI -> synth domain first
@@ -448,7 +449,7 @@ local DESTINATION = {[0]="Destination off","osc 1 freq","osc 2 freq","osc 3 freq
     "w-env o3/p4", "w-env o1/p5", "w-env o2/p5", "w-env o3/p5", "w-env o1/p6", "w-env o2/p6", "w-env o3/p6", "pan spread", "effect 1 mix", "effect 1 par 1", "effect 1 par 2", "effect 1 par 3", "effect 2 mix", "effect 2 par 1", 
     "effect 2 par 2", "effect 2 par 3", "osc 1 fine", "osc 2 fine", "osc 3 fine", "osc all fine", "mod 1 amount", "mod 2 amount", "mod 3 amount", "mod 4 amount", "mod 5 amount", "mod 6 amount", "mod 7 amount", "mod 8 amount", "smpl start time",
 }
-
+-- update names of mod matrix destination controls
 function destination(valueObject,value)
   local control = valueObject:getControl():getId()
     controls.get(control):setName (DESTINATION[value])
@@ -457,15 +458,14 @@ end
 local SOURCE = {[0]="Source off","osc 1","osc 2","osc 3","filter envelope","amp envelope","LFO 1", "LFO 2","LFO 3", "LFO 4","envelope 3","envelope 4","osc1 wave env", "osc 2 wave env", "osc 3 wave env", "PB wheel", "Mod wheel",
     "velocity", "pressure", "foot pedal", "midi expression", "note number", "random", "DC", "noise", "audio out", "audio in", "MPE PB", "MPE Y axis", "midi breath ctrl",
 }
-
+-- update names of mod matrix source controls
 function source(valueObject,value)
   local control = valueObject:getControl():getId()
     controls.get(control):setName (SOURCE[value])
 end
 
--- one-shot flag for next timer tick
-local refreshUnisonPending = false
 
+-- control visibility of part 1/2 unison params
 local function setGroupVisible(ids, visible, color, slotMap)
   for _, id in ipairs(ids) do
     if color then controls.get(id):setColor(color) end
@@ -494,16 +494,7 @@ function refreshUnisonVisibility()
   end
 end
 
--- bound to param 397
-function moveUnison1(valueObject, value)
-  refreshUnisonVisibility()
-end
-
--- bound to param 398
-function moveUnison2(valueObject, value)
-  refreshUnisonVisibility()
-end
-
+-- control visibility of note sync params
 function showSyncRate1(valueObject,value)
   local visiBool = value == 1 -- show sync rate for lfo 1 if sync is on
   controls.get(CTRL_LFO1_SYNC):setVisible(visiBool) 

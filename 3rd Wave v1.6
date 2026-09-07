@@ -105,7 +105,7 @@ local sampleNumber = 0
 -- 3rd Wave-reported channel (source of truth when available)
 local midiChannel = nil
 
--- assign MIDI channel based on Peak
+-- assign MIDI channel based on 3rd Wave
 function assignChannel(valueObject, value)
   if midiChannel == nil then return end
   device:setChannel(midiChannel)

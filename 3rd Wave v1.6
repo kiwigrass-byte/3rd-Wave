@@ -66,8 +66,8 @@ local FX2_VIS = {
 -- slot reference for pulse width control ---
 local TARGET_SLOT = {4,16,28}
 -- slot reference for unison controls
-local SLOT_UNISON1 = {[60]=19,[66]=20,[61]=21,[63]=22,[46]=23}
-local SLOT_UNISON2 = {[412]=19,[413]=20,[414]=21,[415]=22,[416]=23}
+local SLOT_UNISON1 = {[60]=20,[66]=21,[61]=22,[63]=23,[46]=24}
+local SLOT_UNISON2 = {[412]=20,[413]=21,[414]=22,[415]=23,[416]=24}
 
 -- page references ---
 local CTRL_PAGE = 1
@@ -619,22 +619,6 @@ function adsrValueName(valueObject, value)
   -- print ("ctl = "..id..", base Name = "..ahdsrBaseNames[id])
 end
 
--- ── Wave Envelope value-in-name suffix ───────────────────────────────────────────────
--- Appends the live value of an AR envelope's primary stage to its tile
--- title, e.g. "TIME 1" -> "TIME 1 101". The base (unsuffixed) name is
--- captured the first time each control is seen so repeat updates don't keep
--- stacking suffixes onto an already-modified name.
-
-local arBaseNames = {}
--- [442]={"TIME 1"},[445]={"TIME 2"}
-function arValueName(valueObject, value)
-  local ctrl = valueObject:getControl()
-  local id = ctrl:getId()
-  if not arBaseNames[id] then arBaseNames[id] = ctrl:getName() end
-  ctrl:setName(arBaseNames[id] .. " " .. string.format("%d", value))
-  -- print ("ctl = "..id..", base Name = "..ahdsrBaseNames[id])
-end
-
 ------------------------------------------------------------------
 --                  midi request functions                  --
 ------------------------------------------------------------------
@@ -1102,12 +1086,18 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   local pNum = msg:getParameterNumber()
   local pType = msg:getType()
 
+  -- set unison parameter visibility
   if pType == PT_VIRTUAL and (
       pNum == PART_SELECT or
       pNum == UNISON1_PARAM or
       pNum == UNISON2_PARAM
     ) then
     refreshUnisonVisibility()
+  end
+  if pType == PT_VIRTUAL and pNum == PART_SELECT then
+    if midiValue == 1 then controls.get(UNISON1_CTRL):setSlot(19,CTRL_PAGE)
+    elseif midiValue == 2 then controls.get(UNISON2_CTRL):setSlot(19,CTRL_PAGE)
+    end
   end
 
   -- set the parameter names for each type of FX 1 and FX 2

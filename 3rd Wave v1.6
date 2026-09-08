@@ -1099,6 +1099,17 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
     elseif midiValue == 2 then controls.get(UNISON2_CTRL):setSlot(19,CTRL_PAGE)
     end
   end
+  
+  -- send sequencer start/stop messages. Currently not working ??
+  if pType == PT_VIRTUAL and pNum == 10043 then
+    if midiValue == 1 then
+      local midiMessage = { type = START }
+      midi.sendMessage(port,midiMessage)
+    elseif midiValue == 0 then
+      local midiMessage = { type = STOP }
+      midi.sendMessage(port,midiMessage)
+    end
+  end
 
   -- set the parameter names for each type of FX 1 and FX 2
   if pNum == FX1_TYPE then

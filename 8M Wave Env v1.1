@@ -1,0 +1,453 @@
+-- 3rd Wave 8M v1.6 envelope editor (wave-only, env target 1..3)
+-- Standalone first-pass with NRPN transmit
+
+assert(
+    controller.isRequired(MODEL_MK2, "4.1.4"),
+    "Version 4.1.4 or higher is required"
+)
+
+local DEBUG = true
+
+local function dprint(msg)
+   if DEBUG then print(msg) end
+end
+
+portNum = PORT_1
+port = portNum
+midiCh = 1 -- if needed, try 0 for 0-based environments
+
+-- hide or show loop guides
+local SHOW_LOOP_GUIDES = false
+
+-- ---------- Envelope model ----------
+WAVEPTS = 6
+NUMPTS  = WAVEPTS
+
+TIME_MIN = 0
+TIME_MAX = 127
+LEVEL_MIN = 0
+LEVEL_MAX = 63
+
+LOW_MIDI = 0
+HI_MIDI  = 127
+
+WIN_OFST = 70
+SUSTAIN  = 64
+SCALEX   = 0.90625
+SCALEY   = 3
+
+
+AX  = 1
+AY  = 2
+CLR = 3
+
+-- ---------- Colors ----------
+local STD_COLOR = 0xB0C0
+local ACT_COLOR = 0xFF0000
+local ON_COLOR  = 0x0000FF
+
+-- ---------- Virtual parameter numbers ----------
+-- All are virtual in your setup
+local UI_STAGE_SELECT = 5008
+local UI_TIME_EDIT    = 5009
+local UI_LEVEL_EDIT   = 5010
+local UI_ENV_TARGET   = 5011   -- envelope target selector: 1..3
+
+-- ---------- Synth NRPN base numbers (env1) ----------
+local STAGE_TIME_NRPN  = {134, 137, 140, 143, 146, 149}
+local STAGE_LEVEL_NRPN = {265, 268, 271, 274, 277, 280}
+
+local LOOP_STATE_NRPN_BASE = 234
+local LOOP_START_NRPN_BASE = 155
+local LOOP_END_NRPN_BASE   = 152
+
+-- ---------- Geometry ----------
+local DRAW_H = 220
+local XY_PAD_WIDTH  = math.floor((128 * SCALEX * WAVEPTS) + SUSTAIN + 0.5)
+local XY_PAD_HEIGHT = math.floor(DRAW_H + WIN_OFST + 0.5)
+
+-- ---------- Runtime state ----------
+activePt = 1
+
+-- target synth envelope 1..3
+local targetEnv = 1
+local envOffset = 0 -- targetEnv - 1
+
+local waveEnv = {}
+waveEnv[0] = {TIME_MIN, LEVEL_MIN, STD_COLOR}
+waveEnv[WAVEPTS+1] = {TIME_MAX, LEVEL_MAX, STD_COLOR}
+
+local defaultP = {48, 1, 48, 1, 48, 1}
+for i=1,WAVEPTS do
+   waveEnv[i] = {TIME_MAX, defaultP[i] or 0, STD_COLOR}
+end
+waveEnv[activePt][CLR] = ACT_COLOR
+
+-- single loop only: [startSeg, endSeg, enabled, color]
+envLoop = {}
+envLoop[1] = {1, 6, false, ON_COLOR}
+
+local g = graphics
+local xyPadControl = controls.get(4)
+xyPadControl.x = 0
+xyPadControl.y = 0
+
+local function clamp(v, lo, hi)
+   return math.max(lo, math.min(hi, v))
+end
+
+function sendNRPN(ch, nrpn, value)
+  midi.sendControlChange(port, ch, 99, math.floor(nrpn / 128))
+  midi.sendControlChange(port, ch, 98, nrpn % 128)
+  midi.sendControlChange(port, ch, 6,  math.floor(value / 128))
+  midi.sendControlChange(port, ch, 38, value % 128)
+end
+
+local function txStageTime(stage, value)
+   local nrpn = STAGE_TIME_NRPN[stage] + envOffset
+   local v = clamp(value, TIME_MIN, TIME_MAX)
+   sendNRPN(midiCh, nrpn, v)
+   dprint(string.format("NRPN TX env=%d stage=%d TIME nrpn=%d val=%d", targetEnv, stage, nrpn, v))
+end
+
+local function txStageLevel(stage, value)
+   local nrpn = STAGE_LEVEL_NRPN[stage] + envOffset
+   local v = clamp(value, LEVEL_MIN, LEVEL_MAX)
+   sendNRPN(midiCh, nrpn, v)
+   dprint(string.format("NRPN TX env=%d stage=%d LEVEL nrpn=%d val=%d", targetEnv, stage, nrpn, v))
+end
+
+local function txLoopState(isOn)
+   local nrpn = LOOP_STATE_NRPN_BASE + envOffset
+   local v = isOn and 1 or 0
+   sendNRPN(midiCh, nrpn, v)
+   dprint(string.format("NRPN TX env=%d LOOP_STATE nrpn=%d val=%d", targetEnv, nrpn, v))
+end
+
+local function txLoopStart(v)
+   local nrpn = LOOP_START_NRPN_BASE + envOffset
+   local val = clamp(v, 1, WAVEPTS)
+   sendNRPN(midiCh, nrpn, val)
+   dprint(string.format("NRPN TX env=%d LOOP_START nrpn=%d val=%d", targetEnv, nrpn, val))
+end
+
+local function txLoopEnd(v)
+   local nrpn = LOOP_END_NRPN_BASE + envOffset
+   local val = clamp(v, 1, WAVEPTS)
+   sendNRPN(midiCh, nrpn, val)
+   dprint(string.format("NRPN TX env=%d LOOP_END nrpn=%d val=%d", targetEnv, nrpn, val))
+end
+
+function preset.onLoad()
+    local bounds = xyPadControl:getBounds()
+    bounds[WIDTH]  = math.floor(XY_PAD_WIDTH + 0.5)
+    bounds[HEIGHT] = math.floor(XY_PAD_HEIGHT + 0.5)
+    xyPadControl:setBounds(bounds)
+
+    xyPadControl:setPaintCallback(paintXyPad)
+    xyPadControl:setTouchCallback(touchCallback)
+
+    -- Stage selector control range (control 5 in your current layout)
+    local ctlId = controls.get(5)
+    local valId = ctlId:getValue("value")
+    valId:setRange(1, NUMPTS, 1, true)
+
+    -- Single-loop control colors
+    local c = controls.get(1); if c ~= nil then c:setColor(ON_COLOR) end
+    c = controls.get(8); if c ~= nil then c:setColor(ON_COLOR) end
+    c = controls.get(9); if c ~= nil then c:setColor(ON_COLOR) end
+
+    -- Do NOT hide control 3 (you are using it for env target now)
+end
+
+function printValues()
+   local fs = 10           -- font size (was 10)
+   local dx = 110           -- horizontal spacing (was 110)
+
+   for i=1,NUMPTS do
+      g.setColor(waveEnv[i][CLR])
+      g.print(i*dx,  0, string.format("T%d: %d ", i, waveEnv[i][AX]), fs, LEFT)
+      g.print(i*dx, 18, string.format("P%d: %d ", i, waveEnv[i][AY]), fs, LEFT)
+   end
+
+   g.setColor(STD_COLOR)
+   g.print(5, 42, string.format("Target Env: %d", targetEnv), 11, LEFT)
+end
+
+--[[
+function printValues()
+   -- Row 1: compact per-stage summary
+   local dx = 88
+   for i=1,NUMPTS do
+      if i == activePt then g.setColor(ACT_COLOR) else g.setColor(STD_COLOR) end
+      g.print(i*dx, 2, string.format("%d:T%03d", i, waveEnv[i][AX]), 10, LEFT)
+      g.print(i*dx, 18, string.format("  P%02d", waveEnv[i][AY]), 10, LEFT)
+   end
+
+   -- Row 2: focused readout (visually "bigger" by isolation)
+   g.setColor(ON_COLOR)
+   if activePt >= 1 and activePt <= WAVEPTS then
+      g.print(5, 42, string.format("ENV %d   STAGE %d   TIME %d   POS %d",
+         targetEnv, activePt, waveEnv[activePt][AX], waveEnv[activePt][AY]), 10, LEFT)
+   else
+      g.print(5, 42, string.format("ENV %d   STAGE --", targetEnv), 10, LEFT)
+   end
+end
+]]
+function loopCalc(loop)
+   local st = 0
+   for i=1,envLoop[loop][1] do st = st + waveEnv[i][AX] end
+   st = math.floor(st * SCALEX)
+
+   local sz = 0
+   for i=envLoop[loop][1]+1,envLoop[loop][2]+1 do sz = sz + waveEnv[i][AX] end
+   sz = math.floor(sz * SCALEX)
+   return st, sz
+end
+
+function paintXyPad(control, value)
+
+   local bounds = control:getBounds()
+   g.setColor(0x0000)
+   g.fillRect(0, 0, bounds[WIDTH], bounds[HEIGHT])
+
+   g.setColor(STD_COLOR)
+   g.drawRect(0, WIN_OFST, bounds[WIDTH], bounds[HEIGHT]-WIN_OFST)
+
+   local strt, lnth = loopCalc(1)
+   g.setColor(envLoop[1][4])
+   if SHOW_LOOP_GUIDES then
+      if (envLoop[1][3] == true) then
+         g.fillRect(strt, 35, lnth, 10)
+      else
+         local keyRel = 0
+         for j=1,envLoop[1][2]-1 do keyRel = keyRel + waveEnv[j][AX] end
+         keyRel = math.floor(keyRel * SCALEX) + SUSTAIN
+         g.fillRect(keyRel-5, 35, 10, 10)
+      end
+   end
+
+   local xPos = 0
+   local yPos = XY_PAD_HEIGHT
+   for i=1,NUMPTS do
+      local xScale = math.floor(waveEnv[i][AX] * SCALEX)
+      local yScale = waveEnv[i][AY] * SCALEY
+--      local ym1Scale = (i > 1) and (waveEnv[i-1][AY] * SCALEY) or yScale
+      local ym1Scale = ((i > 1) and waveEnv[i-1][AY] or waveEnv[0][AY]) * SCALEY
+
+      g.setColor(waveEnv[i][CLR])
+      g.fillCircle(xPos + xScale, yPos - yScale, 10)
+
+      g.setColor(STD_COLOR)
+      g.drawLine(xPos, yPos - ym1Scale, xPos + xScale, yPos - yScale)
+
+      xPos = xPos + xScale
+
+      if SHOW_LOOP_GUIDES then
+         if (i == envLoop[1][2]-1) and (envLoop[1][3] == false) then
+            g.drawLine(xPos, yPos - yScale, xPos + SUSTAIN, yPos - yScale)
+            xPos = xPos + SUSTAIN
+         end
+      end
+   end
+
+   printValues()
+end
+
+function touchCallback(control, touchEvent)
+   local endPt = NUMPTS + 1
+   local tolerance = 25
+
+   if touchEvent.type == MOVE then
+      if (touchEvent.y < WIN_OFST) then return end
+
+      local preX = 0
+      for i=1,activePt-1 do preX = preX + waveEnv[i][AX] end
+
+      local postX = preX + waveEnv[activePt][AX]
+      if (activePt ~= endPt) then postX = postX + waveEnv[activePt+1][AX] end
+
+      if (activePt ~= endPt) and (touchEvent.x >= preX) and (touchEvent.x <= postX) then
+         control.x = touchEvent.x
+         control.y = touchEvent.y
+
+         local t = clamp(math.floor((control.x - preX) / SCALEX), TIME_MIN, TIME_MAX)
+         local l = clamp(math.floor((XY_PAD_HEIGHT - control.y) / SCALEY), LEVEL_MIN, LEVEL_MAX)
+         waveEnv[activePt][AX] = t
+         waveEnv[activePt][AY] = l
+
+         parameterMap.set(1, PT_VIRTUAL, UI_TIME_EDIT, t)
+         parameterMap.set(1, PT_VIRTUAL, UI_LEVEL_EDIT, l)
+      end
+
+   elseif touchEvent.type == DOWN then
+      local i = 1
+      local xPos = 0
+      local yPos = XY_PAD_HEIGHT
+
+      if (touchEvent.y >= WIN_OFST) then
+         local minDist = math.huge
+         local closestPt = endPt
+
+         while (i < endPt) do
+            local xScale = math.floor(waveEnv[i][AX] * SCALEX)
+            if (envLoop[1][3] == false) and (i == envLoop[1][2]) then
+               xScale = xScale + SUSTAIN
+            end
+            local yScale = waveEnv[i][AY] * SCALEY
+
+            local dist = math.sqrt((touchEvent.x - (xPos + xScale))^2 + (touchEvent.y - (yPos - yScale))^2)
+            if dist < minDist then
+               minDist = dist
+               closestPt = i
+            end
+
+            xPos = xPos + xScale
+            i = i + 1
+         end
+
+         if minDist <= tolerance then i = closestPt else i = endPt end
+      else
+         i = endPt
+      end
+
+      if (activePt ~= endPt) then waveEnv[activePt][CLR] = STD_COLOR end
+      if (i ~= endPt) then waveEnv[i][CLR] = ACT_COLOR end
+
+      activePt = i
+      parameterMap.set(1, PT_VIRTUAL, UI_STAGE_SELECT, math.min(activePt, endPt))
+   end
+
+   control:repaint()
+end
+
+function parameterMap.onChange(valueObjects, origin, midiValue)
+  if (origin == MIDI) then return end
+
+  local msg = valueObjects[1]:getMessage()
+  local pNum = msg:getParameterNumber()
+  local pType = msg:getType()
+
+  if pType == PT_VIRTUAL and pNum < 5000 then
+   sendNRPN(midiCh, pNum, midiValue)
+  end
+
+   -- Only handle our known UI virtual params
+   if (origin == LUA)
+      and (pNum ~= UI_TIME_EDIT)
+      and (pNum ~= UI_LEVEL_EDIT)
+      and (pNum ~= UI_STAGE_SELECT)
+      and (pNum ~= UI_ENV_TARGET) then
+      return
+   end
+
+   -- stage time edit -> synth
+   if (pNum == UI_TIME_EDIT) then
+      if activePt >= 1 and activePt <= WAVEPTS then
+         txStageTime(activePt, midiValue)
+      end
+      return
+   end
+
+   -- stage level edit -> synth
+   if (pNum == UI_LEVEL_EDIT) then
+      if activePt >= 1 and activePt <= WAVEPTS then
+         txStageLevel(activePt, midiValue)
+      end
+      return
+   end
+end
+
+function dispDot(valueObject, value)
+   if (activePt == NUMPTS+1) then return "None" end
+   return math.floor(activePt)
+end
+
+function dispX(valueObject, value)
+   if (activePt == NUMPTS+1) then return " ? " end
+   return math.floor(waveEnv[activePt][AX])
+end
+
+function dispY(valueObject, value)
+   if (activePt == NUMPTS+1) then return " ? " end
+   return math.floor(waveEnv[activePt][AY])
+end
+
+function adjustTime(valueObject, value)
+   if (activePt ~= NUMPTS+1) then
+      local t = clamp(value, TIME_MIN, TIME_MAX)
+      waveEnv[activePt][AX] = t
+      parameterMap.set(1, PT_VIRTUAL, UI_TIME_EDIT, t)
+      xyPadControl:repaint()
+   end
+end
+
+function adjustLevel(valueObject, value)
+   if (activePt ~= NUMPTS+1) then
+      local l = clamp(value, LEVEL_MIN, LEVEL_MAX)
+      waveEnv[activePt][AY] = l
+      parameterMap.set(1, PT_VIRTUAL, UI_LEVEL_EDIT, l)
+      xyPadControl:repaint()
+   end
+end
+
+function selectStage(valueObject, value)
+   waveEnv[activePt][CLR] = STD_COLOR
+   activePt = clamp(math.floor(value), 1, NUMPTS)
+   waveEnv[activePt][CLR] = ACT_COLOR
+
+   parameterMap.set(1, PT_VIRTUAL, UI_TIME_EDIT,  waveEnv[activePt][AX])
+   parameterMap.set(1, PT_VIRTUAL, UI_LEVEL_EDIT, waveEnv[activePt][AY])
+
+   xyPadControl:repaint()
+end
+
+local UI_ENV_EDIT_1 = 45
+local UI_ENV_EDIT_2 = 46
+local UI_ENV_EDIT_3 = 47
+
+local function txSynthEnvEditFocus(envNum)
+   local v1 = (envNum == 1) and 1 or 0
+   local v2 = (envNum == 2) and 1 or 0
+   local v3 = (envNum == 3) and 1 or 0
+
+   sendNRPN(midiCh, UI_ENV_EDIT_1, v1)
+   sendNRPN(midiCh, UI_ENV_EDIT_2, v2)
+   sendNRPN(midiCh, UI_ENV_EDIT_3, v3)
+
+   dprint(string.format("NRPN TX envFocus env=%d -> [45]=%d [46]=%d [47]=%d", envNum, v1, v2, v3))
+end
+
+-- bind your env-target selector control callback to this (values 1..3)
+function selectTargetEnvelope(valueObject, value)
+   local raw = math.floor(value)
+   if raw >= 0 and raw <= 2 then raw = raw + 1 end -- list-control normalization
+
+   targetEnv = clamp(raw, 1, 3)
+   envOffset = targetEnv - 1
+
+   txSynthEnvEditFocus(targetEnv)
+
+   dprint(string.format("Target envelope set: target=%d offset=%d", targetEnv, envOffset))
+   xyPadControl:repaint()
+end
+
+-- Single-loop handlers (controls for loop state/start/end)
+function setState(valueObject, value)
+   envLoop[1][3] = (value == 1)
+   txLoopState(envLoop[1][3])
+   xyPadControl:repaint()
+end
+
+function setStart(valueObject, value)
+   envLoop[1][1] = clamp(value, 1, WAVEPTS)
+   if (envLoop[1][2] < envLoop[1][1]) then envLoop[1][2] = envLoop[1][1] end
+   txLoopStart(envLoop[1][1])
+   xyPadControl:repaint()
+end
+
+function setEnd(valueObject, value)
+   envLoop[1][2] = clamp(value, envLoop[1][1], WAVEPTS)
+   txLoopEnd(envLoop[1][2])
+   xyPadControl:repaint()
+end

@@ -10,8 +10,7 @@
 - To use the start/stop control for the sequencer set the midi clock source to *in: tempo sync*.
 ---
 **What's in the preset**
-- Automatic parsing of a patch when a new patch is selected.
-- The **PATCH SELECT** buttons send a program change message before loading the patch data and mapping to the UI controls. Parsing is not immediate because the sysEx dump is over 5k per patch. 
+- Automatic parsing of a patch when a new patch is selected. The **PATCH SELECT** buttons send a program change message before loading the patch data and mapping to the UI controls. Note that parsing is not immediate because the sysEx dump is over 5k per patch. 
 - Turning the **PATCH NAMES** switch 'on' retrieves all the patch names from all banks. The button should toggle to an 'off' state after all 500 names are read. The patch number fader will then display the patch names when scrolling. This process takes a couple of minutes to complete. The patch names are then stored locally on the E1 and are loaded instantly whenever the E1 loads. If you later change teh saved patches on the 3rd Wave or move the preset to a different E1 slot then repeat the process.
 - Only parameters for one part can be viewed and edited a time. Use the **PART VIEW** control to switch between the parsed part 1 and part 2 parameter values. 
 - Use the **COMPARE** control to switch between an edited sound (and UI) and the original patch sound (and UI). Very useful! 

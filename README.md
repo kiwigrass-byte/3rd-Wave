@@ -19,11 +19,11 @@
 
 ----
 **What's not in the preset**
-- Preset parameters do not update when changed on the 3rd Wave other than a program change. Don't edit on the 3rd Wave or the UI will get out of sync. 
+- Preset parameters do not update when changed on the 3rd Wave other than a program change. If you edit on the 3rd Wave the UI will get out of sync. 
 - No wavetable or multi-sample editing or management.
 - No sequencer pattern building.
-- No global settings are parsed. A couple of global parameters (dark blue) can be changed from the preset. 
-- No saving of edited patches from the UI.
+- No global settings are parsed. A couple of global parameters (dark blue) can be changed from the preset. A sysEx message for global settings is expected.
+- No saving of patches.
 
 ----
 

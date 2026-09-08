@@ -7,6 +7,7 @@
 - **IMPORTANT:** In addition to *MIDI param receive* set to CC+NRPN, the preset expects that *MIDI include part in NRPN* is turned on in the global settings.
 - The preset is built for the default factory P and U wavetables. Some adjustment would be needed for other wavetables, including wavetable names and adjusting *count* in WT_SEGMENTS.   
 - The preset has the single and part 1 nrpn's sent on MIDI channel 1, and the part 2 nrpn's sending on channel 2. Change accordingly.
+- To use the start/stop control for the sequencer set the midi clock source to *in: tempo sync*.
 ---
 **What's in the preset**
 - Automatic parsing of a patch when a new patch is selected.

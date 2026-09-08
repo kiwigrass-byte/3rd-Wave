@@ -2,6 +2,12 @@
 -- September 2026
 -- by @kiwigrass
 
+local DEBUG = false
+
+local function dprint(msg)
+   if DEBUG then print(msg) end
+end
+
 -------------------------------- Declare Global Constants -----------------------------
 -- 3rd wave model id number: 0x01 for 24 voice products, 0x02 for 8 voice
 local MODEL_BYTE = 0x02
@@ -887,9 +893,20 @@ local function toSynthParNumForPart(parNum, partSel)
   return parNum
 end
 
+local function resolvePartChannel(partSel)
+  if partSel == 2 then
+    local d = devices.get(3)
+    return (d and d:getChannel()) or wavePart2Ch or part2Channel or channel or 1
+  else
+    local d = devices.get(2)
+    return (d and d:getChannel()) or wavePart1Ch or part1Channel or channel or 1
+  end
+end
+
 -- Send a full cache to synth on selected part/channel.
 local function sendCacheToSynth(cache, partSel)
-  local ch = (partSel == 2) and part2Channel or part1Channel
+  local ch = resolvePartChannel(partSel)
+--  local ch = (partSel == 2) and part2Channel or part1Channel
   for parNum, value in pairs(cache) do
     local outPar = toSynthParNumForPart(parNum, partSel)
     sendNRPN(ch, outPar, value)
@@ -1070,12 +1087,6 @@ end
 -- 3rd Wave 8M v1.6 envelope editor (wave-only, env target 1..3)
 -- Standalone first-pass with NRPN transmit
 
-local DEBUG = true
-
-local function dprint(msg)
-   if DEBUG then print(msg) end
-end
-
 -- hide or show loop guides
 local SHOW_LOOP_GUIDES = false
 
@@ -1159,35 +1170,35 @@ end
 local function txStageTime(stage, value)
    local nrpn = STAGE_TIME_NRPN[stage] + envOffset
    local v = clamp(value, TIME_MIN, TIME_MAX)
-   sendNRPN(midiCh, nrpn, v)
+   sendNRPN(channel, nrpn, v)
    dprint(string.format("NRPN TX env=%d stage=%d TIME nrpn=%d val=%d", targetEnv, stage, nrpn, v))
 end
 
 local function txStageLevel(stage, value)
    local nrpn = STAGE_LEVEL_NRPN[stage] + envOffset
    local v = clamp(value, LEVEL_MIN, LEVEL_MAX)
-   sendNRPN(midiCh, nrpn, v)
+   sendNRPN(channel, nrpn, v)
    dprint(string.format("NRPN TX env=%d stage=%d LEVEL nrpn=%d val=%d", targetEnv, stage, nrpn, v))
 end
 
 local function txLoopState(isOn)
    local nrpn = LOOP_STATE_NRPN_BASE + envOffset
    local v = isOn and 1 or 0
-   sendNRPN(midiCh, nrpn, v)
+   sendNRPN(channel, nrpn, v)
    dprint(string.format("NRPN TX env=%d LOOP_STATE nrpn=%d val=%d", targetEnv, nrpn, v))
 end
 
 local function txLoopStart(v)
    local nrpn = LOOP_START_NRPN_BASE + envOffset
    local val = clamp(v, 1, WAVEPTS)
-   sendNRPN(midiCh, nrpn, val)
+   sendNRPN(channel, nrpn, val)
    dprint(string.format("NRPN TX env=%d LOOP_START nrpn=%d val=%d", targetEnv, nrpn, val))
 end
 
 local function txLoopEnd(v)
    local nrpn = LOOP_END_NRPN_BASE + envOffset
    local val = clamp(v, 1, WAVEPTS)
-   sendNRPN(midiCh, nrpn, val)
+   sendNRPN(channel, nrpn, val)
    dprint(string.format("NRPN TX env=%d LOOP_END nrpn=%d val=%d", targetEnv, nrpn, val))
 end
 
@@ -1384,9 +1395,9 @@ local function txSynthEnvEditFocus(envNum)
    local v2 = (envNum == 2) and 1 or 0
    local v3 = (envNum == 3) and 1 or 0
 
-   sendNRPN(midiCh, UI_ENV_EDIT_1, v1)
-   sendNRPN(midiCh, UI_ENV_EDIT_2, v2)
-   sendNRPN(midiCh, UI_ENV_EDIT_3, v3)
+   sendNRPN(channel, UI_ENV_EDIT_1, v1)
+   sendNRPN(channel, UI_ENV_EDIT_2, v2)
+   sendNRPN(channel, UI_ENV_EDIT_3, v3)
 
    dprint(string.format("NRPN TX envFocus env=%d -> [45]=%d [46]=%d [47]=%d", envNum, v1, v2, v3))
 end
@@ -1557,24 +1568,6 @@ function preset.onLoad()
   loadNameBank()  -- restore cached patch names first
   pages.display(1)
   refreshUnisonVisibility()
-
-  local bounds = xyPadControl:getBounds()
-  bounds[WIDTH]  = math.floor(XY_PAD_WIDTH + 0.5)
-  bounds[HEIGHT] = math.floor(XY_PAD_HEIGHT + 0.5)
-  xyPadControl:setBounds(bounds)
-
-  xyPadControl:setPaintCallback(paintXyPad)
-  xyPadControl:setTouchCallback(touchCallback)
-
-  -- Stage selector control range (control 5 in your current layout)
-  local ctlId = controls.get(270)
-  local valId = ctlId:getValue("value")
-  valId:setRange(1, NUMPTS, 1, true)
-
-  -- Single-loop control colors
-  local c = controls.get(252); if c ~= nil then c:setColor(ON_COLOR) end
-  c = controls.get(253); if c ~= nil then c:setColor(ON_COLOR) end
-  c = controls.get(254); if c ~= nil then c:setColor(ON_COLOR) end
 end
 
 -- called after loading 
@@ -1582,3 +1575,25 @@ function preset.onReady()
   getWaveCount(nil,1) -- number of wave tables
 end
 
+function pages.onChange(newPageId, oldPageId)
+  if newPageId == 6 then
+    -- wave envelope graphic 
+    local bounds = xyPadControl:getBounds()
+    bounds[WIDTH]  = math.floor(XY_PAD_WIDTH + 0.5)
+    bounds[HEIGHT] = math.floor(XY_PAD_HEIGHT + 0.5)
+    xyPadControl:setBounds(bounds)
+
+    xyPadControl:setPaintCallback(paintXyPad)
+    xyPadControl:setTouchCallback(touchCallback)
+
+    -- Stage selector control range (control 5 in your current layout)
+    local ctlId = controls.get(270)
+    local valId = ctlId:getValue("value")
+    valId:setRange(1, NUMPTS, 1, true)
+
+    -- Single-loop control colors
+    local c = controls.get(252); if c ~= nil then c:setColor(ON_COLOR) end
+    c = controls.get(253); if c ~= nil then c:setColor(ON_COLOR) end
+    c = controls.get(254); if c ~= nil then c:setColor(ON_COLOR) end
+  end
+end

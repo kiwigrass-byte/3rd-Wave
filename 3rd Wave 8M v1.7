@@ -78,6 +78,7 @@ local SLOT_UNISON2 = {[412]=20,[413]=21,[414]=22,[415]=23,[416]=24}
 -- page references ---
 local CTRL_PAGE = 1
 local OSC_PAGE  = 2
+local W_ENV_PAGE = 6
 
 -- other constants --
 local bankTxt={"B1","B2","B3","B4","B5"} 
@@ -258,6 +259,18 @@ local function flushNameBankIfDirty()
     saveNameBank()
     nameBankDirty = false
   end
+end
+
+-- called when preset first loads
+function preset.onLoad()
+  loadNameBank()  -- restore cached patch names first
+  pages.display(1)
+  refreshUnisonVisibility()
+end
+
+-- called after loading 
+function preset.onReady()
+  getWaveCount(nil,1) -- number of wave tables
 end
 
 ----------UI formatter functions -----------------
@@ -1030,7 +1043,7 @@ function midi.onSysex(midiInput, sysexBlock)
     syncWtUiFromSynthParams()
     refreshFxParamNames()
     refreshUnisonVisibility()
-
+    syncWaveEnvFromVisibleCaches()
 
   -- edit buffer data received (doesn't contain bank byte or program number byte)
   -- cmd 0x03 edit buffer dump byte map:
@@ -1402,18 +1415,64 @@ local function txSynthEnvEditFocus(envNum)
    dprint(string.format("NRPN TX envFocus env=%d -> [45]=%d [46]=%d [47]=%d", envNum, v1, v2, v3))
 end
 
+-- Wave-envelope synth param bases (env 1); env 2/3 use +1/+2 via envOffset
+local WENV_TIME_BASE  = {134, 137, 140, 143, 146, 149}
+local WENV_LEVEL_BASE = {265, 268, 271, 274, 277, 280}
+
+local function getVisibleCaches()
+  local partSel = getPartSel()
+  local cmp = getCompareMode()
+  local srcSingle = cmp and singleBase or singleEdit
+  local srcPart = (partSel == 2)
+      and (cmp and part2Base or part2Edit)
+      or  (cmp and part1Base or part1Edit)
+  return srcSingle, srcPart
+end
+
+function syncWaveEnvFromVisibleCaches()
+  local srcSingle, srcPart = getVisibleCaches()
+  local off = envOffset or 0
+
+  for i = 1, WAVEPTS do
+    local tPar = WENV_TIME_BASE[i] + off
+    local lPar = WENV_LEVEL_BASE[i] + off
+
+    -- part cache first, fallback to single cache
+    local t = srcPart[tPar]
+    if t == nil then t = srcSingle[tPar] end
+
+    local l = srcPart[lPar]
+    if l == nil then l = srcSingle[lPar] end
+
+    if t ~= nil then waveEnv[i][AX] = clamp(t, TIME_MIN, TIME_MAX) end
+    if l ~= nil then waveEnv[i][AY] = clamp(l, LEVEL_MIN, LEVEL_MAX) end
+  end
+
+  -- keep edit knobs in sync with selected point
+  if activePt >= 1 and activePt <= WAVEPTS then
+    isApplyingCache = true
+    parameterMap.set(deviceId, PT_VIRTUAL, UI_TIME_EDIT,  waveEnv[activePt][AX])
+    parameterMap.set(deviceId, PT_VIRTUAL, UI_LEVEL_EDIT, waveEnv[activePt][AY])
+    isApplyingCache = false
+  end
+
+  if xyPadControl then xyPadControl:repaint() end
+end
+
 -- bind your env-target selector control callback to this (values 1..3)
 function selectTargetEnvelope(valueObject, value)
-   local raw = math.floor(value)
-   if raw >= 0 and raw <= 2 then raw = raw + 1 end -- list-control normalization
+  local raw = math.floor(value)
+  if raw >= 0 and raw <= 2 then raw = raw + 1 end -- list-control normalization
 
-   targetEnv = clamp(raw, 1, 3)
-   envOffset = targetEnv - 1
+  targetEnv = clamp(raw, 1, 3)
+  envOffset = targetEnv - 1
 
-   txSynthEnvEditFocus(targetEnv)
+  syncWaveEnvFromVisibleCaches()
 
-   dprint(string.format("Target envelope set: target=%d offset=%d", targetEnv, envOffset))
-   xyPadControl:repaint()
+  txSynthEnvEditFocus(targetEnv)
+
+  dprint(string.format("Target envelope set: target=%d offset=%d", targetEnv, envOffset))
+  xyPadControl:repaint()
 end
 
 -- Single-loop handlers (controls for loop state/start/end)
@@ -1442,35 +1501,37 @@ end
 function parameterMap.onChange(valueObjects, origin, midiValue)
   if (origin == MIDI) then return end
 
-  local msg = valueObjects[1]:getMessage()
-  local pNum = msg:getParameterNumber()
+  local msg   = valueObjects[1]:getMessage()
+  local pNum  = msg:getParameterNumber()
   local pType = msg:getType()
 
-   -- Only handle our known UI virtual params
-   if (origin == LUA)
-      and (pNum ~= UI_TIME_EDIT)
-      and (pNum ~= UI_LEVEL_EDIT)
-      and (pNum ~= UI_STAGE_SELECT) then
-      return
-   end
+  ----------------------------------------------------------------------
+  -- 1) Envelope editor UI-only params (LUA-origin from controls/touch)
+  --    Handle these first, but DO NOT early-return for unrelated params.
+  ----------------------------------------------------------------------
+  if pNum == UI_TIME_EDIT then
+    if activePt >= 1 and activePt <= WAVEPTS then
+      txStageTime(activePt, midiValue)
+    end
+    return
+  end
 
-   -- stage time edit -> synth
-   if (pNum == UI_TIME_EDIT) then
-      if activePt >= 1 and activePt <= WAVEPTS then
-         txStageTime(activePt, midiValue)
-      end
-      return
-   end
+  if pNum == UI_LEVEL_EDIT then
+    if activePt >= 1 and activePt <= WAVEPTS then
+      txStageLevel(activePt, midiValue)
+    end
+    return
+  end
 
-   -- stage level edit -> synth
-   if (pNum == UI_LEVEL_EDIT) then
-      if activePt >= 1 and activePt <= WAVEPTS then
-         txStageLevel(activePt, midiValue)
-      end
-      return
-   end
-   
-  -- set unison parameter visibility
+  -- UI_STAGE_SELECT is consumed by your selectStage() callback path.
+  -- No NRPN send here.
+  if pNum == UI_STAGE_SELECT then
+    return
+  end
+
+  ----------------------------------------------------------------------
+  -- 2) Visibility / UI housekeeping
+  ----------------------------------------------------------------------
   if pType == PT_VIRTUAL and (
       pNum == PART_SELECT or
       pNum == UNISON1_PARAM or
@@ -1478,105 +1539,113 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
     ) then
     refreshUnisonVisibility()
   end
+
   if pType == PT_VIRTUAL and pNum == PART_SELECT then
-    if midiValue == 1 then controls.get(UNISON1_CTRL):setSlot(19,CTRL_PAGE)
-    elseif midiValue == 2 then controls.get(UNISON2_CTRL):setSlot(19,CTRL_PAGE)
-    end
-  end
-  
-  -- send sequencer start/stop messages. Currently not working ??
-  if pType == PT_VIRTUAL and pNum == 10043 then
     if midiValue == 1 then
-      local midiMessage = { type = START }
-      midi.sendMessage(port,midiMessage)
-    elseif midiValue == 0 then
-      local midiMessage = { type = STOP }
-      midi.sendMessage(port,midiMessage)
+      controls.get(UNISON1_CTRL):setSlot(19, CTRL_PAGE)
+    elseif midiValue == 2 then
+      controls.get(UNISON2_CTRL):setSlot(19, CTRL_PAGE)
     end
+
+    repaintFromVisibleCaches()
+    syncWtUiFromSynthParams()
+    if syncWaveEnvFromVisibleCaches then syncWaveEnvFromVisibleCaches() end
+    return
   end
 
-  -- set the parameter names for each type of FX 1 and FX 2
+  if pType == PT_VIRTUAL and pNum == COMPARE_IT then
+    repaintFromVisibleCaches()
+    syncWtUiFromSynthParams()
+    if syncWaveEnvFromVisibleCaches then syncWaveEnvFromVisibleCaches() end
+    resendVisibleToSynth() -- comment out for visual-only compare
+    return
+  end
+
+  ----------------------------------------------------------------------
+  -- 3) Sequencer start/stop
+  ----------------------------------------------------------------------
+  if pType == PT_VIRTUAL and pNum == 10043 then
+    if midiValue == 1 then
+      midi.sendMessage(port, { type = START })
+    else
+      midi.sendMessage(port, { type = STOP })
+    end
+    return
+  end
+
+  ----------------------------------------------------------------------
+  -- 4) FX naming updates
+  ----------------------------------------------------------------------
   if pNum == FX1_TYPE then
     updateFxParamNames(FX1_SPEC, midiValue, CTRL_FX1_NAME_IDS, "Param")
-  elseif pNum == FX2_TYPE then 
+  elseif pNum == FX2_TYPE then
     updateFxParamNames(FX2_SPEC, midiValue, CTRL_FX2_NAME_IDS, "Param")
   end
-  -- UI fader changed -> convert to synth value
+
+  ----------------------------------------------------------------------
+  -- 5) Wavetable UI<->synth virtual mapping
+  ----------------------------------------------------------------------
   local uiIdx = (pType == PT_VIRTUAL) and findIndex(WT_UI_PARAMS, pNum) or nil
   if uiIdx and not wtSyncing then
     wtSyncing = true
-    local s,tag = uiToSynth(midiValue)
+    local s = uiToSynth(midiValue)
+
     -- hide/show wavetable offset and pulse width
     if s >= 256 and s <= 262 then
       controls.get(CTRL_PULSE[uiIdx]):setSlot(TARGET_SLOT[uiIdx], OSC_PAGE)
     else
       controls.get(CTRL_OFFSET[uiIdx]):setSlot(TARGET_SLOT[uiIdx], OSC_PAGE)
     end
+
     parameterMap.set(deviceId, PT_VIRTUAL, WT_SYNTH_PARAMS[uiIdx], s)
     wtSyncing = false
     return
   end
-  -- Synth wavetable changed -> reflect back on compact UI fader
+
   local syIdx = (pType == PT_VIRTUAL) and findIndex(WT_SYNTH_PARAMS, pNum) or nil
   if syIdx and not wtSyncing then
     wtSyncing = true
     parameterMap.set(deviceId, PT_VIRTUAL, WT_UI_PARAMS[syIdx], synthToUi(midiValue))
     wtSyncing = false
-    -- no return: allow normal cache/NRPN path for synth param
+    -- no return: continue to normal cache/NRPN path for synth param
   end
-  -- UI/meta controls first (no direct NRPN for these)
-  if pType == PT_VIRTUAL and pNum == PART_SELECT then
-    repaintFromVisibleCaches()
-    return
-  end
-  if pType == PT_VIRTUAL and pNum == COMPARE_IT then
-    repaintFromVisibleCaches()
-    resendVisibleToSynth() -- comment out for visual-only compare
-    return
-  end
-  -- Suppress outgoing actions while repainting cache into parameterMap
+
+  ----------------------------------------------------------------------
+  -- 6) Never send while repainting cache into parameterMap
+  ----------------------------------------------------------------------
   if isApplyingCache then return end
 
-  -- Voice parameter edits -> update edit cache + send NRPN
+  ----------------------------------------------------------------------
+  -- 7) Voice param edits -> cache + NRPN out
+  ----------------------------------------------------------------------
   if pType == PT_VIRTUAL and isVoiceParam(pNum) then
-    local uiPar = pNum
-    local outPar = pNum
+    local uiPar   = pNum
+    local outPar  = pNum
     local partNum = getPartSel()
-    local ch = part1Channel
+    local ch      = resolvePartChannel(partNum)
+
     if partNum == 2 then
-      ch = part2Channel
       outPar = toSynthParNumForPart(outPar, 2)
     end
-    -- In edit mode, persist local tweak into edit cache
+
     if not getCompareMode() then
       if singleEdit[uiPar] ~= nil then
         singleEdit[uiPar] = midiValue
       end
-
       if partNum == 2 then
         part2Edit[uiPar] = midiValue
       else
         part1Edit[uiPar] = midiValue
       end
     end
+
     sendNRPN(ch, outPar, midiValue)
   end
 end
 
--- called when preset first loads
-function preset.onLoad()
-  loadNameBank()  -- restore cached patch names first
-  pages.display(1)
-  refreshUnisonVisibility()
-end
-
--- called after loading 
-function preset.onReady()
-  getWaveCount(nil,1) -- number of wave tables
-end
-
+-- set up graphic when change to the wave envelopes page
 function pages.onChange(newPageId, oldPageId)
-  if newPageId == 6 then
+  if newPageId == W_ENV_PAGE then
     -- wave envelope graphic 
     local bounds = xyPadControl:getBounds()
     bounds[WIDTH]  = math.floor(XY_PAD_WIDTH + 0.5)

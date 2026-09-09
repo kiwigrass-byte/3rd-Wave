@@ -13,7 +13,8 @@
 - Automatic parsing of a patch when a new patch is selected. The **PATCH SELECT** buttons send a program change message before loading the patch data and mapping to the UI controls. Note that parsing is not immediate because the sysEx dump is over 5k per patch. 
 - Turning the **PATCH NAMES** switch 'on' retrieves all the patch names from all banks. The button should toggle to an 'off' state after all 500 names are read. The patch number fader will then display the patch names when scrolling. This process takes a couple of minutes to complete. The patch names are then stored locally on the E1 and are loaded immediately whenever the preset loads. If you later install different patches on the 3rd Wave or move the E1 preset to a different slot on the controller then repeat the process.
 - Only parameters for one part can be viewed and edited a time. Use the **PART VIEW** control to switch between the parsed part 1 and part 2 parameter values. 
-- Use the **COMPARE** control to switch between an edited sound (and UI) and the original patch sound (and UI). Very useful! 
+- Use the **COMPARE** control to switch between an edited sound (and UI) and the original patch sound (and UI). Very useful!
+- Thanks to @oldgerguy on the Electra One forum there is a touch screen UI for each of the three 6-stage wavetable-envelopes that makes visualizing and editing much easier and more fun. It should largely mimic the dynamic graphic on the 8M screen except only one envelope is shown at a time.  
 - Various button and list controls on the first page mimic the selection buttons on the 3rd Wave's front panel. 
 - Controls are hidden when not in use.
 

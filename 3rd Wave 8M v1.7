@@ -8,7 +8,10 @@ local function dprint(msg)
    if DEBUG then print(msg) end
 end
 
--------------------------------- Declare Global Constants -----------------------------
+-- events to track
+events.subscribe(PAGES | POTS)
+
+-------------------------------- Global Constants -----------------------------
 -- 3rd wave model id number: 0x01 for 24 voice products, 0x02 for 8 voice
 local MODEL_BYTE = 0x02
 
@@ -25,20 +28,42 @@ local PART_SELECT = 10029 -- not nrpn 69 which displays part info on 3rd Wave's 
 local COMPARE_IT = 10039
 local FX1_TYPE = 227
 local FX2_TYPE = 231
+
 -- UI wavetable params (visible controls), one per oscillator
 local WT_UI_PARAMS    = {10040, 10041, 10042}
+
 -- Synth wavetable params (actual NRPN-mapped virtual params) stored on hidden page
 local WT_SYNTH_PARAMS = {102,   103,   104}
+
 -- toggle for part1 and part 2 unison modes
 local UNISON1_PARAM = 397
 local UNISON2_PARAM = 398
 
+---- wave envelope parameters ----------
+local UI_STAGE_SELECT = 5008
+local UI_TIME_EDIT    = 5009
+local UI_LEVEL_EDIT   = 5010
+local UI_ENV_TARGET   = 5011   -- envelope target selector: 1..3
+local STAGE_TIME_NRPN  = {134, 137, 140, 143, 146, 149}
+local STAGE_LEVEL_NRPN = {265, 268, 271, 274, 277, 280}
+
+local LOOP_STATE_NRPN_BASE = 234
+local LOOP_START_NRPN_BASE = 155
+local LOOP_END_NRPN_BASE   = 152
+
+-- hidden wave env edit buttons --
+local UI_ENV_EDIT_1 = 45
+local UI_ENV_EDIT_2 = 46
+local UI_ENV_EDIT_3 = 47
+
 -------------- ctrl ids ---------------------
 -- program number ctrl id
 local CTRL_PROG_NUMBER = 3
+
 -- osc control ids
 local CTRL_PULSE  = {27,28,29}
 local CTRL_OFFSET = {30,31,32}
+
 -- sync control ids
 local CTRL_LFO1_SYNC = 226
 local CTRL_LFO2_SYNC = 329
@@ -46,9 +71,11 @@ local CTRL_LFO3_SYNC = 227
 local CTRL_LFO4_SYNC = 228
 local CTRL_FX1_SYNC = 324
 local CTRL_FX2_SYNC = 326
+
 -- unison control (exc switch) ids
 local CTRL_UNISON1 = {60,66,61,63,46}
 local CTRL_UNISON2 = {412,413,414,415,416}
+
 -- unison toggle control ids
 local UNISON1_CTRL  = 59
 local UNISON2_CTRL  = 411
@@ -57,7 +84,48 @@ local UNISON2_CTRL  = 411
 local CTRL_FX1_IDS = {311,312,313,428, 430,431,432} 
 local CTRL_FX2_IDS = {315,316,317,318,319,320,58, 433,434,437,435,436} 
 
--- Visibility map for CTRL_FX1_IDS and CTRL_FX2_IDS:
+-- Default FX param controls -- for name updates. Other FX controls have hard coded names
+local CTRL_FX1_NAME_IDS = {311,312,313,428} 
+local CTRL_FX2_NAME_IDS = {315,316,317,318,319,320,58} 
+
+-- wave envelope control ids
+local W_ENV_STAGE_CTRL = 270
+local W_ENV_LOOP_CTRL = 252
+local W_ENV_START_CTRL = 253
+local W_ENV_RELEASE_CTRL = 254
+local XY_PAD_CTRL = 116
+
+------------ Wave Envelope UI constants ----------
+local WAVEPTS = 6
+local NUMPTS  = WAVEPTS
+local TIME_MIN = 0
+local TIME_MAX = 127
+local LEVEL_MIN = 0
+local LEVEL_MAX = 63
+local LOW_MIDI = 0
+local HI_MIDI  = 127
+local WIN_OFST = 70
+local SUSTAIN  = 64
+local SCALEX   = 0.90625
+local SCALEY   = 3
+local AX  = 1
+local AY  = 2
+local CLR = 3
+
+local STD_COLOR = 0xB0C0
+local ACT_COLOR = 0xFF0000
+local ON_COLOR  = 0x32CD32
+
+-- ---------- wave envelope UI Geometry ----------
+local DRAW_H = 220
+local XY_PAD_WIDTH  = math.floor((128 * SCALEX * WAVEPTS) + SUSTAIN + 0.5)
+local XY_PAD_HEIGHT = math.floor(DRAW_H + WIN_OFST + 0.5)
+
+-- visual y-axis offset (in wave-env units, same 0..63 position domain)
+local WENV_Y_DRAW_NUDGE = 3
+
+
+-- Visibility map for CTRL_FX1_IDS and CTRL_FX2_IDS -----------------
 local FX1_VIS = {
   [7] = {true, false, true, false, true, false, false}, -- leslie 
   [8] = {true, false, false, true, false, true, true }, -- ring mod
@@ -80,9 +148,91 @@ local CTRL_PAGE = 1
 local OSC_PAGE  = 2
 local W_ENV_PAGE = 6
 
+-- wavetable labels
+local WAVETABLE = {
+  -- PPG: 0..35
+  [0]="Wavetable P00","Wavetable P01","Wavetable P02","Wavetable P03","Wavetable P04","Wavetable P05","Wavetable P06","Wavetable P07","Wavetable P08","Wavetable P09","Wavetable P10","Wavetable P11","Wavetable P12","Wavetable P13","Wavetable P14",
+      "Wavetable P15","Wavetable P16","Wavetable P17","Wavetable P18","Wavetable P19","Wavetable P20","Wavetable P21","Wavetable P22","Wavetable P23","Wavetable P24","Wavetable P25","Wavetable P26","Wavetable P27","Wavetable P28","Wavetable P29",
+      "Wavetable P30","Wavetable P31","Wavetable P32","Wavetable P33","VS_0-63","VS_64-127",
+  -- USER: 128..183
+  [128]="Additive_Bell_17", [129]="HumanVowelSweep", [130]="DrewWave", [131]="GrooveSynthesis-WaveTable_BC", [132]="Flute-Harmonics", [133]="CoolFMDirty-WaveTable_DN", [134]="BID700E-WaveTable_KK", [135]="KnobGrotto6-WaveTable_DN", [136]="Burble-WaveTable_DN",
+  [137]="PrimefallOctaveDirty96k-WaveTable_DN", [138]="MultiWave96k-WaveTable_DN", [139]="MetalSweep96k-WaveTable_DN", [140]="ZigZag", [141]="RandomWaves-KK", [142]="CrossoverHMXdirty-WaveTable_DN", [143]="LowSquareSync-WaveTable_DN",
+  [144]="RippinStrange-WaveTable_DN", [145]="Buchla208cB-td_KK", [146]="FIIx_Arr1", [147]="Ringshifted96k-WaveTable_DN", [148]="Fairlight_Harmonic_Doodle", [149]="FiveOscComb-WaveTable_DN", [150]="HarmonicSpreadClip-WaveTable_DN",
+  [151]="14DirtySweep2_96k-WaveTable_DN", [152]="BarberpoleTurbosaw-WaveTable_DN", [153]="Science_Channel", [154]="Metal_Bubbles", [155]="DrumWaveTables-WaveTable_KK", [156]="Fuzzbomb96k-WaveTable_DN", [157]="Ooo_Aah_Sweep", [158]="Prime_Fall-WaveTable",
+  [159]="RingshiftedB96k-WaveTableDN", [160]="KnobGrottoArp16-WaveTable_DN", [161]="Fairlight_Mode1_Loop", [162]="Fairlight_Mode1_Riser", [163]="Ring_Shift_C", [164]="Turbo_Bubbles", [165]="Harmonic_Dirt_Spread", [166]="TurboHamRadio",
+  [167]="Addivie_Bell_Lower", [168]="ResVactrolSquare", [169]="208 Easel 76-H-WaveTable", [170]="Keyumay", [171]="Arp_4072_Saw", [172]="Arp_4072_Square", [173]="Buchla296eSpectra5-WaveTable", [174]="Buchla259Dmx7-WaveTable",
+  [175]="208c 20-A-WaveTable", [176]="FM_Crush", [177]="Synclav_FM_1", [178]="Dub_Grind", [179]="SineFold", [180]="Big_Bang", [181]="Synclav_5", [182]="Additive_8_Bit", [183]="Harmonic_Aah",
+  -- ANALOG: 256..262
+  [256]="Sawtooth",[257]="Square",[258]="SuperSaw",[259]="Sine",[260]="-> Pink Noise",[261]="-> Blue Noise",[262]="Triangle",
+  -- SAMPLE: 512..522
+  [512]="Drums Vinyl Subs&Snares",[513]="Drums Vinyl Cymbals&Toms",[514]="TubeBell",[515]="Marine vocal 3",[516]="mT Kit",[517]="Kalimba",[518]="CowbellNote",[519]="Electric Bass EQ",[520]="808 Kit",[521]="Hanger Drums",[522]="S10"
+}
+
+-- Real synth ranges (change only these if firmware/library changes)
+local WT_SEGMENTS = {
+  { tag="P", synthStart=0,   count=36 }, -- can be up to 48
+  { tag="U", synthStart=128, count=56 }, -- can be up to 64
+  { tag="A", synthStart=256, count=7  },
+  { tag="WM", synthStart=384, count=1  },
+  { tag="S", synthStart=512, count=11 },
+}
+
+-- mod matrix destination labels
+local DESTINATION = {[0]="Destination off","osc 1 freq","osc 2 freq","osc 3 freq","osc all freq","osc 1 level","osc 2 level", "osc 3 level","osc all level", "osc 1 wave env","osc 2 wave env","osc 3 wave env","osc all wave env",
+    "osc 1 FM amount", "osc2 FM amount","osc3 FM amount", "osc all FM amount", "osc 1 drift", "osc 2 drift", "osc 3 drift", "osc all drift", "osc 1 PW", "osc 2 PW", "osc 3 PW", "osc all PW", "LPF drive", "LPF cutoff", 
+    "LPF resonance", "not used", "SVF cutoff","SVF resonance", "SVF mode", "LFO 1 freq", "LFO 2 freq", "LFO 3 freq", "LFO 4 freq", "LFO all freq", "LFO 1 amount", "LFO 2 amount", "LFO 3 amount", "LFO 4 amount", "LFO all amount", 
+    "LPF env amount", "amp env amount","env 3 amount", "env 4 amount", "SVF env amount", "wave env amount", "all env amount", "f-env attack", "a-env attack", "env 3 attack", "env 4 attack", "env all attack", "f-env decay",
+    "a-env decay", "env 3 decay", "env 4 decay", "env all decay", "f-env sustain", "a-env sustain", "env 3 sustain", "env 4 sustain", "env all sustain", "f-env release", "a-env release", "env 3 release", "env 4 release",
+    "env all release", "w-env o1/t1", "w-env o2/t1", "w-env o3/t1", "w-env o1/t2", "w-env o2/t2", "w-env o3/t2", "w-env o1/t3", "w-env o2/t3", "w-env o3/t3", "w-env o1/t4", "w-env o2/t4", "w-env o3/t4", "w-env o1/t5", "w-env o5/t5",
+    "w-env o3/t5", "w-env o1/t6", "w-env o2/t6", "w-env o3/t6", "w-env o1/p1", "w-env o2/p1", "w-env o3/p1", "w-env o1/p2", "w-env o2/p2", "w-env o3/p2", "w-env o1/p3", "w-env o2/p3", "w-env o3/p3", "w-env o1/p4", "w-env o2/p4",
+    "w-env o3/p4", "w-env o1/p5", "w-env o2/p5", "w-env o3/p5", "w-env o1/p6", "w-env o2/p6", "w-env o3/p6", "pan spread", "effect 1 mix", "effect 1 par 1", "effect 1 par 2", "effect 1 par 3", "effect 2 mix", "effect 2 par 1", 
+    "effect 2 par 2", "effect 2 par 3", "osc 1 fine", "osc 2 fine", "osc 3 fine", "osc all fine", "mod 1 amount", "mod 2 amount", "mod 3 amount", "mod 4 amount", "mod 5 amount", "mod 6 amount", "mod 7 amount", "mod 8 amount", "smpl start time",
+}
+
+-- mod matrix source labels
+local SOURCE = {[0]="Source off","osc 1","osc 2","osc 3","filter envelope","amp envelope","LFO 1", "LFO 2","LFO 3", "LFO 4","envelope 3","envelope 4","osc1 wave env", "osc 2 wave env", "osc 3 wave env", "PB wheel", "Mod wheel",
+    "velocity", "pressure", "foot pedal", "midi expression", "note number", "random", "DC", "noise", "audio out", "audio in", "MPE PB", "MPE Y axis", "midi breath ctrl",
+}
+
+-- FX1 (PARAM_227 type select, PARAM_228 sync, params 324/325/326 plus 345)
+local FX1_SPEC = {
+  [0]  = { name="BYPASS", params={ [1]={label="PARAM 1"}, [2]={label="PARAM 2"}, [3]={label="PARAM 3"},  }},
+  [1]  = { name="BBD DELAY", syncParam=228, params={ [1]={label="TIME"}, [2]={label="FEEDBACK"}, [3]={label="CUT OFF"},  }},
+  [2]  = { name="STEREO DELAY", syncParam=228, params={ [1]={label="TIME"}, [2]={label="FEEDBACK"}, [3]={label="CUT OFF"},  }},
+  [3]  = { name="CHORUS", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="TONE"}, }},
+  [4]  = { name="PHASER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACK"}, }},
+  [5]  = { name="FLANGER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACK"}, }},
+  [6]  = { name="DISTORTION", params={ [1]={label="GAIN AMOUNT" }, [2]={label="TONE" }, [3]={label="OUTPUT LEVEL"},  }},
+  [7]  = { name="LESLIE SPEAKER", params={ [1]={label="DRIVE" }, [2]={label="SPEED" }, [3]={label="DISTANCE" },  }},
+  [8]  = { name="RING MOD", params={ [1]={label="FREQ" }, [2]={label="PITCH TRACK" }, [3]={label="CARRIER"  }, [4]={label="PITCH TRK W/REL" },  }},
+
+}
+
+-- FX2 (PARAM_231 type select, PARAM_232 sync, params 328/329/330 plus 348/349/350/466)
+local FX2_SPEC = {
+  [0]  = { name="BYPASS", params={ [1]={label="PARAM 1"}, [2]={label="PARAM 2"}, [3]={label="PARAM 3"},  }},
+  [1]  = { name="BBD DELAY", syncParam=228, params={ [1]={label="TIME"}, [2]={label="FEEDBACK"}, [3]={label="CUT OFF"},  }},
+  [2]  = { name="STEREO DELAY", syncParam=228, params={ [1]={label="TIME"}, [2]={label="FEEDBACK"}, [3]={label="CUT OFF"},  }},
+  [3]  = { name="Echoplex", params={ [1]={label="TIME" }, [2]={label="FEEDBACK" }, [3]={label="WOW&FLUTTER"  }, [4]={label="REC LEVEL" }, [5]={label="HEAD ALIGN" }, [6]={label="TAPE HISS"  }, }},
+  [4]  = { name="CHORUS", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="TONE"}, }},
+  [5]  = { name="PHASER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACK"}, }},
+  [6]  = { name="FLANGER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACK"}, }},
+  [7]  = { name="DISTORTION", params={ [1]={label="GAIN AMOUNT" }, [2]={label="TONE" }, [3]={label="OUTPUT LEVEL"},  }},
+  [8]  = { name="LESLIE SPEAKER", params={ [1]={label="DRIVE" }, [2]={label="SPEED" }, [3]={label="DISTANCE" },  }},
+  [9]  = { name="RING MOD", params={ [1]={label="FREQ" }, [2]={label="PITCH TRACK" }, [3]={label="CARRIER"  }, [4]={label="PITCH TRK W/REL" },  }},
+  [10] = { name="ROOM REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="CUT OFF" }, [3]={label="EARLY AMOUNT" },  }},
+  [11] = { name="HALL REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="CUT OFF" }, [3]={label="EARLY AMOUNT" },  }},
+  [12] = { name="PLATE REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="CUT OFF" }, [3]={label="EARLY AMOUNT" },  }},
+  [13] = { name="SHIMMER REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="PITCH AMOUNT" }, [3]={label="LP/HP CUTOFF" }, [4]={label="BLOOM SPEED" }, [5]={label="HF DAMPING" }, [6]={label="PRE DELAY" }, [7]={label="FEEDBACK" }, }},
+}
+
+-- a tag to keep track of versions of patch-banks on the 3rd Wave 
+local PERSIST_TAG = "3rdWaveProgNamesV1"
+
 -- other constants --
 local bankTxt={"B1","B2","B3","B4","B5"} 
 local authorDate = "kiwigrass 2026" 
+
 
 --  Device information 
 local currentDevice  = devices.get(1)
@@ -94,9 +244,6 @@ devices.create(2, "Part 1", port, 1)
 devices.create(3, "Part 2", port, 2)
 local part1Channel = devices.get(2):getChannel ()
 local part2Channel = devices.get(3):getChannel()
-
--- events to track
-events.subscribe(PAGES | POTS)
 
 -- populate the bottom RH screen information display on load
 info.setText(authorDate)
@@ -169,9 +316,6 @@ end
 --   persist(table)
 --   recall(table)
 -- We persist a tagged flat map and rebuild nameBank on load.
-
--- a tag to keep track of versions of patch-banks on the 3rd Wave 
-local PERSIST_TAG = "3rdWaveProgNamesV1"
 
 local function makePatchKey(bank, patch)
   return string.format("b%d_p%03d", bank, patch) -- bank 0..4, patch 0..99
@@ -335,15 +479,6 @@ local function findIndex(t, v)
   return nil
 end
 
--- Real synth ranges (change only these if firmware/library changes)
-local WT_SEGMENTS = {
-  { tag="P", synthStart=0,   count=36 }, -- can be up to 48
-  { tag="U", synthStart=128, count=56 }, -- can be up to 64
-  { tag="A", synthStart=256, count=7  },
-  { tag="WM", synthStart=384, count=1  },
-  { tag="S", synthStart=512, count=11 },
-}
-
 -- Build UI starts automatically
 local function buildUiStarts(segments)
   local ui = 0
@@ -391,26 +526,6 @@ local function synthToUi(sv)
   return last.uiEnd, last.tag
 end
 
--- wavetable labels
-local WAVETABLE = {
-  -- PPG: 0..35
-  [0]="Wavetable P00","Wavetable P01","Wavetable P02","Wavetable P03","Wavetable P04","Wavetable P05","Wavetable P06","Wavetable P07","Wavetable P08","Wavetable P09","Wavetable P10","Wavetable P11","Wavetable P12","Wavetable P13","Wavetable P14",
-      "Wavetable P15","Wavetable P16","Wavetable P17","Wavetable P18","Wavetable P19","Wavetable P20","Wavetable P21","Wavetable P22","Wavetable P23","Wavetable P24","Wavetable P25","Wavetable P26","Wavetable P27","Wavetable P28","Wavetable P29",
-      "Wavetable P30","Wavetable P31","Wavetable P32","Wavetable P33","VS_0-63","VS_64-127",
-  -- USER: 128..183
-  [128]="Additive_Bell_17", [129]="HumanVowelSweep", [130]="DrewWave", [131]="GrooveSynthesis-WaveTable_BC", [132]="Flute-Harmonics", [133]="CoolFMDirty-WaveTable_DN", [134]="BID700E-WaveTable_KK", [135]="KnobGrotto6-WaveTable_DN", [136]="Burble-WaveTable_DN",
-  [137]="PrimefallOctaveDirty96k-WaveTable_DN", [138]="MultiWave96k-WaveTable_DN", [139]="MetalSweep96k-WaveTable_DN", [140]="ZigZag", [141]="RandomWaves-KK", [142]="CrossoverHMXdirty-WaveTable_DN", [143]="LowSquareSync-WaveTable_DN",
-  [144]="RippinStrange-WaveTable_DN", [145]="Buchla208cB-td_KK", [146]="FIIx_Arr1", [147]="Ringshifted96k-WaveTable_DN", [148]="Fairlight_Harmonic_Doodle", [149]="FiveOscComb-WaveTable_DN", [150]="HarmonicSpreadClip-WaveTable_DN",
-  [151]="14DirtySweep2_96k-WaveTable_DN", [152]="BarberpoleTurbosaw-WaveTable_DN", [153]="Science_Channel", [154]="Metal_Bubbles", [155]="DrumWaveTables-WaveTable_KK", [156]="Fuzzbomb96k-WaveTable_DN", [157]="Ooo_Aah_Sweep", [158]="Prime_Fall-WaveTable",
-  [159]="RingshiftedB96k-WaveTableDN", [160]="KnobGrottoArp16-WaveTable_DN", [161]="Fairlight_Mode1_Loop", [162]="Fairlight_Mode1_Riser", [163]="Ring_Shift_C", [164]="Turbo_Bubbles", [165]="Harmonic_Dirt_Spread", [166]="TurboHamRadio",
-  [167]="Addivie_Bell_Lower", [168]="ResVactrolSquare", [169]="208 Easel 76-H-WaveTable", [170]="Keyumay", [171]="Arp_4072_Saw", [172]="Arp_4072_Square", [173]="Buchla296eSpectra5-WaveTable", [174]="Buchla259Dmx7-WaveTable",
-  [175]="208c 20-A-WaveTable", [176]="FM_Crush", [177]="Synclav_FM_1", [178]="Dub_Grind", [179]="SineFold", [180]="Big_Bang", [181]="Synclav_5", [182]="Additive_8_Bit", [183]="Harmonic_Aah",
-  -- ANALOG: 256..262
-  [256]="Sawtooth",[257]="Square",[258]="SuperSaw",[259]="Sine",[260]="-> Pink Noise",[261]="-> Blue Noise",[262]="Triangle",
-  -- SAMPLE: 512..522
-  [512]="Drums Vinyl Subs&Snares",[513]="Drums Vinyl Cymbals&Toms",[514]="TubeBell",[515]="Marine vocal 3",[516]="mT Kit",[517]="Kalimba",[518]="CowbellNote",[519]="Electric Bass EQ",[520]="808 Kit",[521]="Hanger Drums",[522]="S10"
-}
-
 -- update names of wavetable controls
 function waveTableName(valueObject, value)
   local control = valueObject:getControl():getId()
@@ -448,26 +563,12 @@ function waveTableFormat(valueObject, value)
   return ""
 end
 
--- mod matrix destination labels
-local DESTINATION = {[0]="Destination off","osc 1 freq","osc 2 freq","osc 3 freq","osc all freq","osc 1 level","osc 2 level", "osc 3 level","osc all level", "osc 1 wave env","osc 2 wave env","osc 3 wave env","osc all wave env",
-    "osc 1 FM amount", "osc2 FM amount","osc3 FM amount", "osc all FM amount", "osc 1 drift", "osc 2 drift", "osc 3 drift", "osc all drift", "osc 1 PW", "osc 2 PW", "osc 3 PW", "osc all PW", "LPF drive", "LPF cutoff", 
-    "LPF resonance", "not used", "SVF cutoff","SVF resonance", "SVF mode", "LFO 1 freq", "LFO 2 freq", "LFO 3 freq", "LFO 4 freq", "LFO all freq", "LFO 1 amount", "LFO 2 amount", "LFO 3 amount", "LFO 4 amount", "LFO all amount", 
-    "LPF env amount", "amp env amount","env 3 amount", "env 4 amount", "SVF env amount", "wave env amount", "all env amount", "f-env attack", "a-env attack", "env 3 attack", "env 4 attack", "env all attack", "f-env decay",
-    "a-env decay", "env 3 decay", "env 4 decay", "env all decay", "f-env sustain", "a-env sustain", "env 3 sustain", "env 4 sustain", "env all sustain", "f-env release", "a-env release", "env 3 release", "env 4 release",
-    "env all release", "w-env o1/t1", "w-env o2/t1", "w-env o3/t1", "w-env o1/t2", "w-env o2/t2", "w-env o3/t2", "w-env o1/t3", "w-env o2/t3", "w-env o3/t3", "w-env o1/t4", "w-env o2/t4", "w-env o3/t4", "w-env o1/t5", "w-env o5/t5",
-    "w-env o3/t5", "w-env o1/t6", "w-env o2/t6", "w-env o3/t6", "w-env o1/p1", "w-env o2/p1", "w-env o3/p1", "w-env o1/p2", "w-env o2/p2", "w-env o3/p2", "w-env o1/p3", "w-env o2/p3", "w-env o3/p3", "w-env o1/p4", "w-env o2/p4",
-    "w-env o3/p4", "w-env o1/p5", "w-env o2/p5", "w-env o3/p5", "w-env o1/p6", "w-env o2/p6", "w-env o3/p6", "pan spread", "effect 1 mix", "effect 1 par 1", "effect 1 par 2", "effect 1 par 3", "effect 2 mix", "effect 2 par 1", 
-    "effect 2 par 2", "effect 2 par 3", "osc 1 fine", "osc 2 fine", "osc 3 fine", "osc all fine", "mod 1 amount", "mod 2 amount", "mod 3 amount", "mod 4 amount", "mod 5 amount", "mod 6 amount", "mod 7 amount", "mod 8 amount", "smpl start time",
-}
 -- update names of mod matrix destination controls
 function destination(valueObject,value)
   local control = valueObject:getControl():getId()
     controls.get(control):setName (DESTINATION[value])
 end
--- mod matrix source labels
-local SOURCE = {[0]="Source off","osc 1","osc 2","osc 3","filter envelope","amp envelope","LFO 1", "LFO 2","LFO 3", "LFO 4","envelope 3","envelope 4","osc1 wave env", "osc 2 wave env", "osc 3 wave env", "PB wheel", "Mod wheel",
-    "velocity", "pressure", "foot pedal", "midi expression", "note number", "random", "DC", "noise", "audio out", "audio in", "MPE PB", "MPE Y axis", "midi breath ctrl",
-}
+
 -- update names of mod matrix source controls
 function source(valueObject,value)
   local control = valueObject:getControl():getId()
@@ -529,41 +630,6 @@ end
 ----------------------------------------------------------------
 -- FX SPEC TABLES
 ----------------------------------------------------------------
--- FX1 (PARAM_227 type select, PARAM_228 sync, params 324/325/326 plus 345)
-local FX1_SPEC = {
-  [0]  = { name="BYPASS", params={ [1]={label="PARAM 1"}, [2]={label="PARAM 2"}, [3]={label="PARAM 3"},  }},
-  [1]  = { name="BBD DELAY", syncParam=228, params={ [1]={label="TIME"}, [2]={label="FEEDBACK"}, [3]={label="CUT OFF"},  }},
-  [2]  = { name="STEREO DELAY", syncParam=228, params={ [1]={label="TIME"}, [2]={label="FEEDBACK"}, [3]={label="CUT OFF"},  }},
-  [3]  = { name="CHORUS", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="TONE"}, }},
-  [4]  = { name="PHASER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACK"}, }},
-  [5]  = { name="FLANGER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACK"}, }},
-  [6]  = { name="DISTORTION", params={ [1]={label="GAIN AMOUNT" }, [2]={label="TONE" }, [3]={label="OUTPUT LEVEL"},  }},
-  [7]  = { name="LESLIE SPEAKER", params={ [1]={label="DRIVE" }, [2]={label="SPEED" }, [3]={label="DISTANCE" },  }},
-  [8]  = { name="RING MOD", params={ [1]={label="FREQ" }, [2]={label="PITCH TRACK" }, [3]={label="CARRIER"  }, [4]={label="PITCH TRK W/REL" },  }},
-
-}
-
--- FX2 (PARAM_231 type select, PARAM_232 sync, params 328/329/330 plus 348/349/350/466)
-local FX2_SPEC = {
-  [0]  = { name="BYPASS", params={ [1]={label="PARAM 1"}, [2]={label="PARAM 2"}, [3]={label="PARAM 3"},  }},
-  [1]  = { name="BBD DELAY", syncParam=228, params={ [1]={label="TIME"}, [2]={label="FEEDBACK"}, [3]={label="CUT OFF"},  }},
-  [2]  = { name="STEREO DELAY", syncParam=228, params={ [1]={label="TIME"}, [2]={label="FEEDBACK"}, [3]={label="CUT OFF"},  }},
-  [3]  = { name="Echoplex", params={ [1]={label="TIME" }, [2]={label="FEEDBACK" }, [3]={label="WOW&FLUTTER"  }, [4]={label="REC LEVEL" }, [5]={label="HEAD ALIGN" }, [6]={label="TAPE HISS"  }, }},
-  [4]  = { name="CHORUS", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="TONE"}, }},
-  [5]  = { name="PHASER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACK"}, }},
-  [6]  = { name="FLANGER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACK"}, }},
-  [7]  = { name="DISTORTION", params={ [1]={label="GAIN AMOUNT" }, [2]={label="TONE" }, [3]={label="OUTPUT LEVEL"},  }},
-  [8]  = { name="LESLIE SPEAKER", params={ [1]={label="DRIVE" }, [2]={label="SPEED" }, [3]={label="DISTANCE" },  }},
-  [9]  = { name="RING MOD", params={ [1]={label="FREQ" }, [2]={label="PITCH TRACK" }, [3]={label="CARRIER"  }, [4]={label="PITCH TRK W/REL" },  }},
-  [10] = { name="ROOM REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="CUT OFF" }, [3]={label="EARLY AMOUNT" },  }},
-  [11] = { name="HALL REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="CUT OFF" }, [3]={label="EARLY AMOUNT" },  }},
-  [12] = { name="PLATE REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="CUT OFF" }, [3]={label="EARLY AMOUNT" },  }},
-  [13] = { name="SHIMMER REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="PITCH AMOUNT" }, [3]={label="LP/HP CUTOFF" }, [4]={label="BLOOM SPEED" }, [5]={label="HF DAMPING" }, [6]={label="PRE DELAY" }, [7]={label="FEEDBACK" }, }},
-}
-
--- Default FX param controls -- for name updates. Other FX controls have hard coded names
-local CTRL_FX1_NAME_IDS = {311,312,313,428} 
-local CTRL_FX2_NAME_IDS = {315,316,317,318,319,320,58} 
 
 local function updateFxParamNames(spec, fxType, ctrlIds, fallbackPrefix)
   local fx = spec and spec[fxType]
@@ -1097,61 +1163,10 @@ function midi.onControlChange(midiInput, ch, controllerNumber, value)
   end
 end
 
--- 3rd Wave 8M v1.6 envelope editor (wave-only, env target 1..3)
--- Standalone first-pass with NRPN transmit
+--------------------- Wave Envelope Editor ------------------------
 
 -- hide or show loop guides
 local SHOW_LOOP_GUIDES = false
-
--- ---------- Envelope model ----------
-WAVEPTS = 6
-NUMPTS  = WAVEPTS
-
-TIME_MIN = 0
-TIME_MAX = 127
-LEVEL_MIN = 0
-LEVEL_MAX = 63
-
-LOW_MIDI = 0
-HI_MIDI  = 127
-
-WIN_OFST = 70
-SUSTAIN  = 64
-SCALEX   = 0.90625
-SCALEY   = 3
-
-
-AX  = 1
-AY  = 2
-CLR = 3
-
--- ---------- Colors ----------
-local STD_COLOR = 0xB0C0
-local ACT_COLOR = 0xFF0000
-local ON_COLOR  = 0x0000FF
-
--- ---------- Virtual parameter numbers ----------
--- All are virtual in your setup
-local UI_STAGE_SELECT = 5008
-local UI_TIME_EDIT    = 5009
-local UI_LEVEL_EDIT   = 5010
-local UI_ENV_TARGET   = 5011   -- envelope target selector: 1..3
-
--- ---------- Synth NRPN base numbers (env1) ----------
-local STAGE_TIME_NRPN  = {134, 137, 140, 143, 146, 149}
-local STAGE_LEVEL_NRPN = {265, 268, 271, 274, 277, 280}
-
-local LOOP_STATE_NRPN_BASE = 234
-local LOOP_START_NRPN_BASE = 155
-local LOOP_END_NRPN_BASE   = 152
-
--- ---------- Geometry ----------
-local DRAW_H = 220
-local XY_PAD_WIDTH  = math.floor((128 * SCALEX * WAVEPTS) + SUSTAIN + 0.5)
-local XY_PAD_HEIGHT = math.floor(DRAW_H + WIN_OFST + 0.5)
-
--- visual y-axis offset (in wave-env units, same 0..63 position domain)
-local WENV_Y_DRAW_NUDGE = 3
 
 -- ---------- Runtime state ----------
 activePt = 1
@@ -1175,7 +1190,7 @@ envLoop = {}
 envLoop[1] = {1, 6, false, ON_COLOR}
 
 local g = graphics
-local xyPadControl = controls.get(116)
+local xyPadControl = controls.get(XY_PAD_CTRL)
 xyPadControl.x = 0
 xyPadControl.y = 0
 
@@ -1399,11 +1414,6 @@ function selectStage(valueObject, value)
 
    xyPadControl:repaint()
 end
-
--- hidden wave env edit buttons --
-local UI_ENV_EDIT_1 = 45
-local UI_ENV_EDIT_2 = 46
-local UI_ENV_EDIT_3 = 47
 
 local function txSynthEnvEditFocus(envNum)
    local v1 = (envNum == 1) and 1 or 0
@@ -1658,13 +1668,13 @@ function pages.onChange(newPageId, oldPageId)
     xyPadControl:setTouchCallback(touchCallback)
 
     -- Stage selector control range (control 5 in your current layout)
-    local ctlId = controls.get(270)
+    local ctlId = controls.get(W_ENV_STAGE_CTRL)
     local valId = ctlId:getValue("value")
     valId:setRange(1, NUMPTS, 1, true)
 
     -- Single-loop control colors
-    local c = controls.get(252); if c ~= nil then c:setColor(ON_COLOR) end
-    c = controls.get(253); if c ~= nil then c:setColor(ON_COLOR) end
-    c = controls.get(254); if c ~= nil then c:setColor(ON_COLOR) end
+    local c = controls.get(W_ENV_LOOP_CTRL); if c ~= nil then c:setColor(ON_COLOR) end
+    c = controls.get(W_ENV_START_CTRL); if c ~= nil then c:setColor(ON_COLOR) end
+    c = controls.get(W_ENV_RELEASE_CTRL); if c ~= nil then c:setColor(ON_COLOR) end
   end
 end

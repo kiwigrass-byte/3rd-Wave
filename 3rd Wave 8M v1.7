@@ -2,6 +2,8 @@
 -- September 2026
 -- by @kiwigrass
 
+-- TODO: implement global settings request when protocol is confirmed
+
 local DEBUG = false
 
 local function dprint(msg)
@@ -21,9 +23,6 @@ local SYSEX_HEADER = {0x00,0x02,0x4A,0x02}
 ------------ virtual parameter numbers ----------------
 local BANK_NUMBER = 10032
 local PROG_NUMBER = 10033
-local SELECT_MINUS = 10034
-local SELECT_IT = 10035
-local SELECT_PLUS = 10036
 local PART_SELECT = 10029 -- not nrpn 69 which displays part info on 3rd Wave's screen
 local COMPARE_IT = 10039
 local FX1_TYPE = 227
@@ -124,6 +123,11 @@ local XY_PAD_HEIGHT = math.floor(DRAW_H + WIN_OFST + 0.5)
 -- visual y-axis offset (in wave-env units, same 0..63 position domain)
 local WENV_Y_DRAW_NUDGE = 3
 
+-- slot reference for pulse width control ---
+local TARGET_SLOT = {4,16,28}
+-- slot reference for unison controls
+local SLOT_UNISON1 = {[60]=20,[66]=21,[61]=22,[63]=23,[46]=24}
+local SLOT_UNISON2 = {[412]=20,[413]=21,[414]=22,[415]=23,[416]=24}
 
 -- Visibility map for CTRL_FX1_IDS and CTRL_FX2_IDS -----------------
 local FX1_VIS = {
@@ -137,16 +141,19 @@ local FX2_VIS = {
   [13] = {true, true, true, true, true, true, true, false, false, false, false, false}, -- shimmer reverb
 }
 
--- slot reference for pulse width control ---
-local TARGET_SLOT = {4,16,28}
--- slot reference for unison controls
-local SLOT_UNISON1 = {[60]=20,[66]=21,[61]=22,[63]=23,[46]=24}
-local SLOT_UNISON2 = {[412]=20,[413]=21,[414]=22,[415]=23,[416]=24}
-
 -- page references ---
 local CTRL_PAGE = 1
 local OSC_PAGE  = 2
 local W_ENV_PAGE = 6
+
+-- a tag to keep track of versions of patch-banks on the 3rd Wave 
+local PERSIST_TAG = "3rdWaveProgNamesV1"
+
+-- other constants --
+local bankTxt={"B1","B2","B3","B4","B5"} 
+local authorDate = "kiwigrass 2026" 
+
+---------- data tables ------------------------
 
 -- wavetable labels
 local WAVETABLE = {
@@ -226,14 +233,6 @@ local FX2_SPEC = {
   [13] = { name="SHIMMER REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="PITCH AMOUNT" }, [3]={label="LP/HP CUTOFF" }, [4]={label="BLOOM SPEED" }, [5]={label="HF DAMPING" }, [6]={label="PRE DELAY" }, [7]={label="FEEDBACK" }, }},
 }
 
--- a tag to keep track of versions of patch-banks on the 3rd Wave 
-local PERSIST_TAG = "3rdWaveProgNamesV1"
-
--- other constants --
-local bankTxt={"B1","B2","B3","B4","B5"} 
-local authorDate = "kiwigrass 2026" 
-
-
 --  Device information 
 local currentDevice  = devices.get(1)
 local deviceId = currentDevice:getId()
@@ -248,19 +247,17 @@ local part2Channel = devices.get(3):getChannel()
 -- populate the bottom RH screen information display on load
 info.setText(authorDate)
 
--- Tracks how many ticks have passed for the timer.onTick function
-local amountTicks = 0 
 -- Set timer tick rate (e.g., every 200 milliseconds) 
 timer.setPeriod(300) 
 
--- Compare feature caches (key = parNum, value = 14-bit value)
+-- Cached synth states (key = parNum, value = 14-bit value)
 local singleBase, part1Base, part2Base = {}, {}, {}
 local singleEdit, part1Edit, part2Edit = {}, {}, {}
 
 -- Guard to prevent onChange recursion during repaint
 local isApplyingCache = false
 
--- UB-Xa-reported channels (source of truth when available)
+-- 3rd Wave-reported channels (source of truth when available)
 local wavePart1Ch = nil
 local wavePart2Ch = nil
 local channelsFromSynth = true
@@ -282,9 +279,6 @@ function onPartSelectChanged(valueObject, value)
   deviceId = device:getId()
   port = device:getPort()
 end
-
--- initialize sysEx data
-local sysExPatch = {}   -- sysExPatch[byte] – stored patch data
 
 -- to store 100 patch names in 5 banks
 local nameBank = {}   
@@ -471,8 +465,6 @@ end
 
 ----------------- create virtual control for wavetable control so control has no dead spots wher ethere aren't wavetables ----------------
 local wtSyncing = false
-local wtLastUi = nil
-local wtLastSynth = nil
 
 local function findIndex(t, v)
   for i = 1, #t do if t[i] == v then return i end end
@@ -602,30 +594,19 @@ function refreshUnisonVisibility()
 end
 
 -- control visibility of note sync params
-function showSyncRate1(valueObject,value)
-  local visiBool = value == 1 -- show sync rate for lfo 1 if sync is on
-  controls.get(CTRL_LFO1_SYNC):setVisible(visiBool) 
+local function showControlWhenOn(ctrlId, value)
+  local c = controls.get(ctrlId)
+  if c then
+    c:setVisible(value == 1)
+  end
 end
-function showSyncRate2(valueObject,value)
-  local visiBool = value == 1 -- show sync rate for lfo 1 if sync is on
-  controls.get(CTRL_LFO2_SYNC):setVisible(visiBool) 
-end
-function showSyncRate3(valueObject,value)
-  local visiBool = value == 1 -- show sync rate for lfo 3 if sync is on
-  controls.get(CTRL_LFO3_SYNC):setVisible(visiBool) 
-end
-function showSyncRate4(valueObject,value)
-  local visiBool = value == 1 -- show sync rate for lfo 4 if sync is on
-  controls.get(CTRL_LFO4_SYNC):setVisible(visiBool) 
-end
-function showSyncRateFx1(valueObject,value)
-  local visiBool = value == 1 -- show sync rate for fx 1 if sync is on
-  controls.get(CTRL_FX1_SYNC):setVisible(visiBool) 
-end
-function showSyncRateFx2(valueObject,value)
-  local visiBool = value == 1 -- show sync rate for fx 2 if sync is on
-  controls.get(CTRL_FX2_SYNC):setVisible(visiBool) 
-end
+
+function showSyncRate1(_, value)  showControlWhenOn(CTRL_LFO1_SYNC, value) end
+function showSyncRate2(_, value)  showControlWhenOn(CTRL_LFO2_SYNC, value) end
+function showSyncRate3(_, value)  showControlWhenOn(CTRL_LFO3_SYNC, value) end
+function showSyncRate4(_, value)  showControlWhenOn(CTRL_LFO4_SYNC, value) end
+function showSyncRateFx1(_, value) showControlWhenOn(CTRL_FX1_SYNC, value) end
+function showSyncRateFx2(_, value) showControlWhenOn(CTRL_FX2_SYNC, value) end
 
 ----------------------------------------------------------------
 -- FX SPEC TABLES
@@ -695,12 +676,6 @@ end
 ------------------------------------------------------------------
 --                  midi request functions                  --
 ------------------------------------------------------------------
--- request device info from the 3rd Wave
-function deviceInquiry(valueObject,value)
-  local message = {0x7E,0x00,0x06,0x01}
-  midi.sendSysex(port,message)
-end
-
 -- request data for program number p from bank b
 function getPatchData(b,p)
 --  local message = concat(SYSEX_HEADER,{0x05,b,p})  -- including sequencer data
@@ -725,12 +700,6 @@ end
 -- request wavetable count by type
 function getWaveCount(valueObject,value)
   local message = concat(SYSEX_HEADER,{0x07})
-  midi.sendSysex(port,message)
-end
-
--- request global settings
-function getGlobals(valueObject,value)
-  local message = concat(SYSEX_HEADER,{0x0B})
   midi.sendSysex(port,message)
 end
 
@@ -831,21 +800,10 @@ end
 --   parameterMap.onChange sends NRPN for voice params (<1024)
 --   while repainting from cache, outgoing MIDI is suppressed via isApplyingCache
 --------------------------------------------------------------------------------
-
--- Loaded snapshot from latest dump (immutable until next dump)
-local singleBase, part1Base, part2Base = {}, {}, {}
-
--- Working edit state (starts as copy of Base, then updated on user edits)
-local singleEdit, part1Edit, part2Edit = {}, {}, {}
-
--- Guard: true only while writing cached values into parameterMap
-local isApplyingCache = false
-
 --------------------------------------------------------------------------------
 -- Utility / state helpers
 --------------------------------------------------------------------------------
 
--- Copy one cache table (shallow copy: key/value pairs)
 local function copyCache(src)
   local dst = {}
   for k, v in pairs(src) do
@@ -854,18 +812,14 @@ local function copyCache(src)
   return dst
 end
 
--- Current visible part selector (1 or 2)
 local function getPartSel()
   return parameterMap.get(deviceId, PT_VIRTUAL, PART_SELECT) or 1
 end
 
--- Compare mode flag:
--- false = Edit mode, true = Compare (Base) mode
 local function getCompareMode()
   return (parameterMap.get(deviceId, PT_VIRTUAL, COMPARE_IT) or 0) == 1
 end
 
--- True for synth voice params (as opposed to UI/meta controls)
 local function isVoiceParam(pNum)
   return pNum < 1024
 end
@@ -874,8 +828,6 @@ end
 -- SysEx decode helpers
 --------------------------------------------------------------------------------
 
--- Extract patch name from first 32 tuples in cmd 0x02 patch dump.
--- Each tuple is [parMSB, parLSB, valMSB, valLSB], character in valLSB.
 local function extractPatchName(sysexBlock)
   local chars = {}
   for i = 9, 136, 4 do
@@ -886,7 +838,6 @@ local function extractPatchName(sysexBlock)
   return table.concat(chars):gsub("%s+$", "")
 end
 
--- Decode a tuple range into cache[parNum] = 14-bit value
 local function decodeNrpnBlockToCache(sysexBlock, startByte, endByte, cache)
   local tupleCount = math.floor((endByte - startByte + 1) / 4)
   for t = 0, tupleCount - 1 do
@@ -913,38 +864,25 @@ local function applyCacheToParams(cache, targetParType)
   end
 end
 
--- Repaint visible UI parameters from current mode + part selection.
--- Must not send MIDI; onChange is suppressed by isApplyingCache.
 local function repaintFromVisibleCaches()
   if isApplyingCache then return end
   isApplyingCache = true
 
-  local partSel = getPartSel()
-  local isCompareMode = getCompareMode()
+  local ok, err = pcall(function()
+    local partSel = getPartSel()
+    local isCompareMode = getCompareMode()
 
-  -- Single layer always visible
-  if isCompareMode then
-    applyCacheToParams(singleBase, PT_VIRTUAL)
-  else
-    applyCacheToParams(singleEdit, PT_VIRTUAL)
-  end
+    local singleCache = isCompareMode and singleBase or singleEdit
+    local partCache = (partSel == 2)
+      and (isCompareMode and part2Base or part2Edit)
+      or  (isCompareMode and part1Base or part1Edit)
 
-  -- Part overlay
-  if partSel == 2 then
-    if isCompareMode then
-      applyCacheToParams(part2Base, PT_VIRTUAL)
-    else
-      applyCacheToParams(part2Edit, PT_VIRTUAL)
-    end
-  else
-    if isCompareMode then
-      applyCacheToParams(part1Base, PT_VIRTUAL)
-    else
-      applyCacheToParams(part1Edit, PT_VIRTUAL)
-    end
-  end
+    applyCacheToParams(singleCache, PT_VIRTUAL)
+    applyCacheToParams(partCache, PT_VIRTUAL)
+  end)
 
   isApplyingCache = false
+  if not ok then print("repaintFromVisibleCaches failed: " .. tostring(err)) end
 end
 
 local function syncWtUiFromSynthParams()
@@ -960,8 +898,6 @@ end
 -- NRPN send helpers
 --------------------------------------------------------------------------------
 
--- Map UI param number to synth NRPN number for selected part.
--- Part 2 uses +1000 offset plus special hole adjustments.
 local function toSynthParNumForPart(parNum, partSel)
   if partSel == 2 then
     if parNum == 397 or parNum == 401 or parNum == 405 or parNum == 409 or parNum == 429 or parNum == 435 then
@@ -982,77 +918,39 @@ local function resolvePartChannel(partSel)
   end
 end
 
--- Send a full cache to synth on selected part/channel.
 local function sendCacheToSynth(cache, partSel)
   local ch = resolvePartChannel(partSel)
---  local ch = (partSel == 2) and part2Channel or part1Channel
   for parNum, value in pairs(cache) do
     local outPar = toSynthParNumForPart(parNum, partSel)
     sendNRPN(ch, outPar, value)
   end
 end
 
--- Push currently visible state to synth (used by Compare toggle).
 local function resendVisibleToSynth()
   local partSel = getPartSel()
   local isCompareMode = getCompareMode()
 
   if isCompareMode then
-    sendCacheToSynth(singleBase, partSel)
-    if partSel == 2 then sendCacheToSynth(part2Base, partSel) else sendCacheToSynth(part1Base, partSel) end
+    sendCacheToSynth(singleBase, 1)
+    if partSel == 2 then
+      sendCacheToSynth(part2Base, 2)
+    else
+      sendCacheToSynth(part1Base, 1)
+    end
   else
-    sendCacheToSynth(singleEdit, partSel)
-    if partSel == 2 then sendCacheToSynth(part2Edit, partSel) else sendCacheToSynth(part1Edit, partSel) end
+    sendCacheToSynth(singleEdit, 1)
+    if partSel == 2 then
+      sendCacheToSynth(part2Edit, 2)
+    else
+      sendCacheToSynth(part1Edit, 1)
+    end
   end
-  print(string.format("Resend to synth: %s mode, Part %d", isCompareMode and "COMPARE (Base)" or "EDIT", partSel))
-end
-
---------------------------------------------------------------------------------
--- Debug / validation helpers
---------------------------------------------------------------------------------
-
-local function sortedKeys(t)
-  local keys = {}
-  if type(t) ~= "table" then return keys end
-  for k, _ in pairs(t) do keys[#keys+1] = k end
-  table.sort(keys)
-  return keys
-end
-
-local function summarizeCache(name, cache)
-  local keys = sortedKeys(cache)
-  local n = #keys
-  if n == 0 then
-    print(name .. ": empty")
-    return
-  end
-
-  local firstK, lastK = keys[1], keys[n]
-  local firstV, lastV = cache[firstK], cache[lastK]
 
   print(string.format(
-    "%s: count=%d first=(p%d v%d) last=(p%d v%d)",
-    name, n, firstK, firstV, lastK, lastV
+    "Resend to synth: %s mode, Part %d",
+    isCompareMode and "COMPARE (Base)" or "EDIT",
+    partSel
   ))
-end
-
-local function validateCaches()
-  summarizeCache("singleBase", singleBase)
-  summarizeCache("part1Base",  part1Base)
-  summarizeCache("part2Base",  part2Base)
-  summarizeCache("singleEdit", singleEdit)
-  summarizeCache("part1Edit",  part1Edit)
-  summarizeCache("part2Edit",  part2Edit)
-end
-
---------------------------------------------------------------------------------
--- Name cleanup helper
---------------------------------------------------------------------------------
-
-local function cleanPatchName(s)
-  s = s:gsub("%z", "")
-  s = s:gsub("%s+$", "")
-  return s
 end
 
 --------------------------------------------------------------------------------
@@ -1104,7 +1002,6 @@ function midi.onSysex(midiInput, sysexBlock)
     part1Edit  = copyCache(part1Base)
     part2Edit  = copyCache(part2Base)
 
-    validateCaches() -- optional debug
     repaintFromVisibleCaches()
     syncWtUiFromSynthParams()
     refreshFxParamNames()

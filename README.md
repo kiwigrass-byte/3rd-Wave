@@ -1,11 +1,12 @@
 
 # Groove Synthesis 3rd Wave 8M with patch parsing and comparison mode
 
+**Requirements**
 - 3rd wave version 1.5 is first public release
 - Synth must be on at least OS 2.0 (August 2026)
 - The 8M is a 2-part synth. The preset might work with the 4-part 24M model, but only for up to 2 parts. To use the 24M change the MODEL_BYTE = 0x02 to 0x01 at the top of the Lua code.
 - **IMPORTANT:** In addition to *MIDI param receive* set to CC+NRPN, the preset expects that *MIDI include part in NRPN* is turned on in the global settings.
-- The preset is built for the default factory P and U wavetables. Some adjustment would be needed for other wavetables, including wavetable names and adjusting *count* in WT_SEGMENTS.   
+- The preset is designed for the default factory P and U wavetables. Some adjustment would be needed for other wavetables, including wavetable names and adjusting *count* in WT_SEGMENTS.   
 - The preset has the single and part 1 nrpn's sent on MIDI channel 1, and the part 2 nrpn's sending on channel 2. Change accordingly.
 - To use the start/stop control for the sequencer set the midi clock source to *in: tempo sync*.
 ---
@@ -48,8 +49,8 @@
 6. the nrpn values for some FX parameters are not consistent - 0/86/172 for leslie speed, and 0/1, 0/128, 0/255 are used for toggles
 
 **NRPN parameter information:**
-- If MIDI multitimbral mode is enabled (global setting) then nrpn 0 is not sent in a sysEx program dump since it is not needed. This code assumes that MIDI multitimbral mode is on! It is not robust to the mode being off because the nrpn mapping assumes it is starting at nrpn 1 (1st character of patch name)                                                 
-- A program consists of 32 nrpn parameters for patch name, 134 single parameters (assuming MIDI multitimbral mode is on), 275 part 1 parameters, 275 part 2 parameters. If the program has n sequencer patterns then there are are also n x 11 sequencer parameters.
+- If *MIDI include part in NRPN* is turned on  (global setting) then nrpn 0 is not sent in a sysEx program dump since it is not needed. The nrpn mapping assumes it is starting at nrpn 1 (1st character of patch name)                                                 
+- The byte structure of the program sysEx dump is: 9..136 patch name tuples (32), 137..672   single block A, 673..1772  part 1 block, 1773..1788 single block B, 1789..2888 part 2 block
 
 [3rd Wave MIDI CC + SysEx Spec v2.0.xlsx](https://github.com/user-attachments/files/31890242/3rd.Wave.MIDI.CC.%2B.SysEx.Spec.v2.0.xlsx)
 [3rd Wave MIDI CC + SysEx Spec v2.0.pdf](https://github.com/user-attachments/files/31797194/3rd.Wave.MIDI.CC.%2B.SysEx.Spec.v2.0.pdf)

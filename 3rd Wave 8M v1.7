@@ -1150,6 +1150,9 @@ local DRAW_H = 220
 local XY_PAD_WIDTH  = math.floor((128 * SCALEX * WAVEPTS) + SUSTAIN + 0.5)
 local XY_PAD_HEIGHT = math.floor(DRAW_H + WIN_OFST + 0.5)
 
+-- visual y-axis offset (in wave-env units, same 0..63 position domain)
+local WENV_Y_DRAW_NUDGE = 3
+
 -- ---------- Runtime state ----------
 activePt = 1
 
@@ -1266,9 +1269,8 @@ function paintXyPad(control, value)
    local yPos = XY_PAD_HEIGHT
    for i=1,NUMPTS do
       local xScale = math.floor(waveEnv[i][AX] * SCALEX)
-      local yScale = waveEnv[i][AY] * SCALEY
-      local ym1Scale = ((i > 1) and waveEnv[i-1][AY] or waveEnv[0][AY]) * SCALEY
-
+      local yScale = clamp(waveEnv[i][AY] + WENV_Y_DRAW_NUDGE, LEVEL_MIN, LEVEL_MAX) * SCALEY
+      local ym1Scale = clamp(((i > 1) and waveEnv[i-1][AY] or waveEnv[0][AY]) + WENV_Y_DRAW_NUDGE, LEVEL_MIN, LEVEL_MAX) * SCALEY
       g.setColor(waveEnv[i][CLR])
       g.fillCircle(xPos + xScale, yPos - yScale, 10)
 
@@ -1306,7 +1308,7 @@ function touchCallback(control, touchEvent)
          control.y = touchEvent.y
 
          local t = clamp(math.floor((control.x - preX) / SCALEX), TIME_MIN, TIME_MAX)
-         local l = clamp(math.floor((XY_PAD_HEIGHT - control.y) / SCALEY), LEVEL_MIN, LEVEL_MAX)
+         local l = clamp(math.floor((XY_PAD_HEIGHT - control.y) / SCALEY) - WENV_Y_DRAW_NUDGE, LEVEL_MIN, LEVEL_MAX)
          waveEnv[activePt][AX] = t
          waveEnv[activePt][AY] = l
 
@@ -1328,8 +1330,7 @@ function touchCallback(control, touchEvent)
             if (envLoop[1][3] == false) and (i == envLoop[1][2]) then
                xScale = xScale + SUSTAIN
             end
-            local yScale = waveEnv[i][AY] * SCALEY
-
+            local yScale = clamp(waveEnv[i][AY] + WENV_Y_DRAW_NUDGE, LEVEL_MIN, LEVEL_MAX) * SCALEY
             local dist = math.sqrt((touchEvent.x - (xPos + xScale))^2 + (touchEvent.y - (yPos - yScale))^2)
             if dist < minDist then
                minDist = dist

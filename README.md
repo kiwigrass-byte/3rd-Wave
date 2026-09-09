@@ -17,7 +17,8 @@
 - Use the **COMPARE** control to switch between an edited sound (and UI) and the original patch sound (and UI). Very useful!
 - Thanks to @oldgearguy on the Electra One forum there is a touch screen UI for each of the three 6-stage wavetable-envelopes that makes visualizing and editing much easier and more fun. It should largely mimic the dynamic graphic on the 8M screen except only one envelope is shown at a time.  
 - Various button and list controls on the first page mimic the selection buttons on the 3rd Wave's front panel. 
-- Controls are hidden when not in use.
+- **Dark blue** controls are global. **White** controls are patch level, and other **colored** controls are part-specific. Controls are hidden when not in use.
+
 
 ----
 **What's not in the preset**

@@ -110,8 +110,8 @@ local AY  = 2
 local CLR = 3
 
 local STD_COLOR = 0xB0C0
-local ACT_COLOR = 0xFF0000
-local ON_COLOR  = 0x32CD32
+local ACT_COLOR = 0xFF0000 -- Red
+local ON_COLOR  = 0x32CD32 -- Green
 
 -- ---------- wave envelope UI Geometry ----------
 local DRAW_H = 220
@@ -292,12 +292,6 @@ for y = 1,5 do
     end
 end
 
--- Helper: safe controls.get() (pcall-wrapped for deleted/invalid IDs) ────────
-local function safeGet(id)
-  local ok, c = pcall(controls.get, id)
-  return ok and c or nil
-end
-
 -- Helper: concatenate two arrays. Used for SysEx message construction
 local function concat(t1, t2)
   local t = {}
@@ -310,7 +304,7 @@ end
 -- Electra One runtime in this preset:
 --   persist(table)
 --   recall(table)
--- We persist a tagged flat map and rebuild nameBank on load.
+-- Persist a tagged flat map and rebuild nameBank on load.
 
 local function makePatchKey(bank, patch)
   return string.format("b%d_p%03d", bank, patch) -- bank 0..4, patch 0..99
@@ -653,7 +647,7 @@ end
 function displayPatchName (valueObject, value)
   local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER) + 1
   local patchName = nameBank[bankNum][value+1]
-  local c = safeGet(CTRL_PROG_NUMBER); if c then c:setName(patchName) end
+  local c = controls.get(CTRL_PROG_NUMBER); if c ~= nil then c:setName(patchName) end
   return (bankTxt[bankNum].."-"..string.format("P%03d",value+1))
 end
 
@@ -1569,10 +1563,5 @@ function pages.onChange(newPageId, oldPageId)
     local ctlId = controls.get(W_ENV_STAGE_CTRL)
     local valId = ctlId:getValue("value")
     valId:setRange(1, NUMPTS, 1, true)
-
-    -- Single-loop control colors
-    local c = controls.get(W_ENV_LOOP_CTRL); if c ~= nil then c:setColor(ON_COLOR) end
-    c = controls.get(W_ENV_START_CTRL); if c ~= nil then c:setColor(ON_COLOR) end
-    c = controls.get(W_ENV_RELEASE_CTRL); if c ~= nil then c:setColor(ON_COLOR) end
   end
 end

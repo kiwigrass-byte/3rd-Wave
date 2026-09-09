@@ -4,14 +4,12 @@
 
 -- TODO: implement global settings request when protocol is confirmed
 
+-- a debug helper. remove later
 local DEBUG = false
 
 local function dprint(msg)
    if DEBUG then print(msg) end
 end
-
--- events to track
-events.subscribe(PAGES | POTS)
 
 -------------------------------- Global Constants -----------------------------
 -- 3rd wave model id number: 0x01 for 24 voice products, 0x02 for 8 voice
@@ -232,6 +230,9 @@ local FX2_SPEC = {
   [12] = { name="PLATE REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="CUT OFF" }, [3]={label="EARLY AMOUNT" },  }},
   [13] = { name="SHIMMER REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="PITCH AMOUNT" }, [3]={label="LP/HP CUTOFF" }, [4]={label="BLOOM SPEED" }, [5]={label="HF DAMPING" }, [6]={label="PRE DELAY" }, [7]={label="FEEDBACK" }, }},
 }
+
+-- events supscription
+events.subscribe(PAGES | POTS)
 
 --  Device information 
 local currentDevice  = devices.get(1)
@@ -703,15 +704,6 @@ function getWaveCount(valueObject,value)
   midi.sendSysex(port,message)
 end
 
--------- send midi nrpn message             
--- alternative to lua API version
-function sendNRPN(ch, nrpn, value)
-  midi.sendControlChange (port , ch , 99, math.floor(nrpn/128))
-  midi.sendControlChange (port , ch , 98, nrpn%128)
-  midi.sendControlChange (port , ch , 6, math.floor(value/128))
-  midi.sendControlChange (port , ch , 38, value%128)
-end
-
 ------- send bank/program number changes and request sysEx of loaded patch 
 function selectIt(valueObject, value)
   if value==0 then return end
@@ -729,7 +721,8 @@ function selectIt(valueObject, value)
   getPatchData(bankNum,progNum)
 end
 
---------------------------- Timer-based program name scanning all patches in all banks ----------------------------------------
+------- Timer-based program name scanning all patches in all banks and persist the names -------------
+
 -- State tracking for the patch scanner
 local patchScanState = {
   bank = 0,           -- current bank (0-4)
@@ -782,6 +775,14 @@ function timer.onTick()
       parameterMap.set(deviceId, PT_VIRTUAL, 10024, 0)
     end
   end
+end
+
+-------- send midi nrpn message to 3rd Wave -------------             
+function sendNRPN(ch, nrpn, value)
+  midi.sendControlChange (port , ch , 99, math.floor(nrpn/128))
+  midi.sendControlChange (port , ch , 98, nrpn%128)
+  midi.sendControlChange (port , ch , 6, math.floor(value/128))
+  midi.sendControlChange (port , ch , 38, value%128)
 end
 
 --------------------------------------------------------------------------------

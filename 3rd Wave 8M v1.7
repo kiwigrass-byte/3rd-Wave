@@ -41,8 +41,10 @@ local UI_STAGE_SELECT = 5008
 local UI_TIME_EDIT    = 5009
 local UI_LEVEL_EDIT   = 5010
 local UI_ENV_TARGET   = 5011   -- envelope target selector: 1..3
-local STAGE_TIME_NRPN  = {134, 137, 140, 143, 146, 149}
-local STAGE_LEVEL_NRPN = {265, 268, 271, 274, 277, 280}
+
+-- Wave-envelope synth param bases (env 1); env 2/3 use +1/+2 via envOffset
+local WENV_TIME_NRPN_BASE  = {134, 137, 140, 143, 146, 149}
+local WENV_LEVEL_NRPN_BASE = {265, 268, 271, 274, 277, 280}
 
 local LOOP_STATE_NRPN_BASE = 234
 local LOOP_START_NRPN_BASE = 155
@@ -1123,7 +1125,7 @@ local function updateActiveWaveEnvEditCache(parNum, value)
 end
 
 local function txStageTime(stage, value)
-   local baseNrpn = STAGE_TIME_NRPN[stage]
+   local baseNrpn = WENV_TIME_NRPN_BASE[stage]
    if baseNrpn == nil then return end
 
    local v = clamp(value, TIME_MIN, TIME_MAX)
@@ -1138,7 +1140,7 @@ local function txStageTime(stage, value)
 end
 
 local function txStageLevel(stage, value)
-   local baseNrpn = STAGE_LEVEL_NRPN[stage]
+   local baseNrpn = WENV_LEVEL_NRPN_BASE[stage]
    if baseNrpn == nil then return end
 
    local v = clamp(value, LEVEL_MIN, LEVEL_MAX)
@@ -1334,10 +1336,6 @@ local function txSynthEnvEditFocus(envNum)
    dprint(string.format("NRPN TX envFocus env=%d -> [45]=%d [46]=%d [47]=%d", envNum, v1, v2, v3))
 end
 
--- Wave-envelope synth param bases (env 1); env 2/3 use +1/+2 via envOffset
-local WENV_TIME_BASE  = {134, 137, 140, 143, 146, 149}
-local WENV_LEVEL_BASE = {265, 268, 271, 274, 277, 280}
-
 local function getVisibleCaches()
   local partSel = getPartSel()
   local cmp = getCompareMode()
@@ -1363,8 +1361,8 @@ function syncWaveEnvFromVisibleCaches()
   local off = envOffset or 0
 
   for i = 1, WAVEPTS do
-    local tPar = WENV_TIME_BASE[i] + off
-    local lPar = WENV_LEVEL_BASE[i] + off
+    local tPar = WENV_TIME_NRPN_BASE[i] + off
+    local lPar = WENV_LEVEL_NRPN_BASE[i] + off
 
     local t = srcPart[tPar]
     if t == nil then t = srcSingle[tPar] end

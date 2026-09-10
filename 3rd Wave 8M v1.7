@@ -926,6 +926,24 @@ local function syncWtUiFromSynthParams()
   wtSyncing = false
 end
 
+local function setControlParameterNumber(ctrlId, parameterNumber)
+  local ctrl = controls.get(ctrlId)
+  if not ctrl then return end
+  local value = ctrl:getValue("value")
+  if not value then return end
+  local message = value:getMessage()
+  if not message then return end
+  message:setParameterNumber(parameterNumber)
+end
+
+function refreshLoopControlBindings()
+  local envIndex = getLoopEnvelopeTarget() + 1
+  setControlParameterNumber(LOOP_STATE_CTRL, LOOP_STATE_NRPN_BASE[envIndex])
+  setControlParameterNumber(LOOP_START_CTRL, LOOP_START_NRPN_BASE[envIndex])
+  setControlParameterNumber(LOOP_END_CTRL, LOOP_END_NRPN_BASE[envIndex])
+  repaintFromVisibleCaches()
+end
+
 --------------------------------------------------------------------------------
 -- NRPN send helpers
 --------------------------------------------------------------------------------
@@ -1047,6 +1065,7 @@ function midi.onSysex(midiInput, sysexBlock)
     syncWtUiFromSynthParams()
     refreshFxParamNames()
     refreshUnisonVisibility()
+    refreshLoopControlBindings()
     syncWaveEnvFromVisibleCaches()
 
   elseif cmd == 0x11 then
@@ -1399,6 +1418,7 @@ function selectTargetEnvelope(valueObject, value)
 
   targetEnv = clamp(raw, 1, 3)
   envOffset = targetEnv - 1
+  refreshLoopControlBindings()
 
   syncWaveEnvFromVisibleCaches()
 

@@ -692,7 +692,7 @@ function onLoopStartChanged(valueObject, value)
     value = math.max(1, endValue - 1)
     parameterMap.set(deviceId, PT_VIRTUAL, LOOP_START_NRPN_BASE + offset, value)
   end
-  return value
+  return (string.format ("%.0f", value))
 end
 
 function onLoopEndChanged(valueObject, value)
@@ -702,7 +702,7 @@ function onLoopEndChanged(valueObject, value)
     value = math.min(6, startValue + 1)
     parameterMap.set(deviceId, PT_VIRTUAL, LOOP_END_NRPN_BASE + offset, value)
   end
-  return value
+  return (string.format ("%.0f", value))
 end
 
 ------------------------------------------------------------------

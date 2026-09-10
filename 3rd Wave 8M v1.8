@@ -1090,18 +1090,45 @@ local function clamp(v, lo, hi)
    return math.max(lo, math.min(hi, v))
 end
 
+local function updateActiveWaveEnvEditCache(parNum, value)
+   if isApplyingCache or getCompareMode() then return end
+
+   local partSel = getPartSel()
+   if partSel == 2 then
+      part2Edit[parNum] = value
+   else
+      part1Edit[parNum] = value
+   end
+end
+
 local function txStageTime(stage, value)
-   local nrpn = STAGE_TIME_NRPN[stage] + envOffset
+   local baseNrpn = STAGE_TIME_NRPN[stage]
+   if baseNrpn == nil then return end
+
    local v = clamp(value, TIME_MIN, TIME_MAX)
-   sendNRPN(channel, nrpn, v)
-   dprint(string.format("NRPN TX env=%d stage=%d TIME nrpn=%d val=%d", targetEnv, stage, nrpn, v))
+   local nrpn = baseNrpn + envOffset
+   local partSel = getPartSel()
+   local outNrpn = toSynthParNumForPart(nrpn, partSel)
+   local ch = resolvePartChannel(partSel)
+
+   updateActiveWaveEnvEditCache(nrpn, v)
+   sendNRPN(ch, outNrpn, v)
+   dprint(string.format("NRPN TX part=%d env=%d stage=%d TIME nrpn=%d val=%d", partSel, targetEnv, stage, outNrpn, v))
 end
 
 local function txStageLevel(stage, value)
-   local nrpn = STAGE_LEVEL_NRPN[stage] + envOffset
+   local baseNrpn = STAGE_LEVEL_NRPN[stage]
+   if baseNrpn == nil then return end
+
    local v = clamp(value, LEVEL_MIN, LEVEL_MAX)
-   sendNRPN(channel, nrpn, v)
-   dprint(string.format("NRPN TX env=%d stage=%d LEVEL nrpn=%d val=%d", targetEnv, stage, nrpn, v))
+   local nrpn = baseNrpn + envOffset
+   local partSel = getPartSel()
+   local outNrpn = toSynthParNumForPart(nrpn, partSel)
+   local ch = resolvePartChannel(partSel)
+
+   updateActiveWaveEnvEditCache(nrpn, v)
+   sendNRPN(ch, outNrpn, v)
+   dprint(string.format("NRPN TX part=%d env=%d stage=%d LEVEL nrpn=%d val=%d", partSel, targetEnv, stage, outNrpn, v))
 end
 
 local function txLoopState(isOn)

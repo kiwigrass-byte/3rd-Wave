@@ -87,9 +87,9 @@ local CTRL_FX2_NAME_IDS = {315,316,317,318,319,320,58}
 
 -- wave envelope control ids
 local W_ENV_STAGE_CTRL = 270
-local W_ENV_LOOP_CTRL = 252
-local W_ENV_START_CTRL = 253
-local W_ENV_RELEASE_CTRL = 254
+local LOOP_STATE_CTRL = 252
+local LOOP_START_CTRL = 253
+local LOOP_END_CTRL = 254
 local XY_PAD_CTRL = 116
 
 ------------ Wave Envelope UI constants ----------
@@ -668,6 +668,37 @@ function adsrValueName(valueObject, value)
   -- print ("ctl = "..id..", base Name = "..ahdsrBaseNames[id])
 end
 
+-- Add this near your other formatter functions (around line 660)
+
+-------------------- Wave Envelope Loop Constraint Validation --------------------
+-- Ensure Start < End for the same envelope target
+-- Called when either Start or End control changes
+
+local function getLoopEnvelopeTarget()
+  -- Returns the currently selected envelope target (1-3, maps to 0-2 offset)
+  return (parameterMap.get(deviceId, PT_VIRTUAL, UI_ENV_TARGET) or 1) - 1
+end
+
+function onLoopStartChanged(valueObject, value)
+  local offset = getLoopEnvelopeTarget()
+  local endValue = parameterMap.get(deviceId, PT_VIRTUAL, LOOP_END_NRPN_BASE + offset) or 6
+  if value >= endValue then
+    value = math.max(1, endValue - 1)
+    parameterMap.set(deviceId, PT_VIRTUAL, LOOP_START_NRPN_BASE + offset, value)
+  end
+  return value
+end
+
+function onLoopEndChanged(valueObject, value)
+  local offset = getLoopEnvelopeTarget()
+  local startValue = parameterMap.get(deviceId, PT_VIRTUAL, LOOP_START_NRPN_BASE + offset) or 1
+  if value <= startValue then
+    value = math.min(6, startValue + 1)
+    parameterMap.set(deviceId, PT_VIRTUAL, LOOP_END_NRPN_BASE + offset, value)
+  end
+  return value
+end
+
 ------------------------------------------------------------------
 --                  midi request functions                  --
 ------------------------------------------------------------------
@@ -1012,16 +1043,6 @@ function midi.onSysex(midiInput, sysexBlock)
     refreshUnisonVisibility()
     syncWaveEnvFromVisibleCaches()
 
-  -- edit buffer data received (doesn't contain bank byte or program number byte)
-  -- cmd 0x03 edit buffer dump byte map:
-  -- 7..134     patch name tuples (32)
-  -- 135..670   single block A
-  -- 671..1770  part 1 block
-  -- 1771..1786 single block B
-  -- 1787..2886 part 2 block
--- elseif cmd == 0x03 then
---    print( "Current edit buffer data received" )
-
   elseif cmd == 0x11 then
     local bankNum = sysexBlock:peek(7)+1
     local progNum = sysexBlock:peek(8)+1
@@ -1066,9 +1087,6 @@ end
 
 --------------------- Wave Envelope Editor ------------------------
 
--- hide or show loop guides
-local SHOW_LOOP_GUIDES = false
-
 -- ---------- Runtime state ----------
 activePt = 1
 
@@ -1085,10 +1103,6 @@ for i=1,WAVEPTS do
    waveEnv[i] = {TIME_MAX, defaultP[i] or 0, STD_COLOR}
 end
 waveEnv[activePt][CLR] = ACT_COLOR
-
--- single loop only: [startSeg, endSeg, enabled, color]
-envLoop = {}
-envLoop[1] = {1, 6, false, ON_COLOR}
 
 local g = graphics
 local xyPadControl = controls.get(XY_PAD_CTRL)
@@ -1175,73 +1189,43 @@ function printValues()
    g.print(5, 42, string.format("Target Env: %d", targetEnv), 11, LEFT)
 end
 
-function loopCalc(loop)
-   local st = 0
-   for i=1,envLoop[loop][1] do st = st + waveEnv[i][AX] end
-   st = math.floor(st * SCALEX)
-
-   local sz = 0
-   for i=envLoop[loop][1]+1,envLoop[loop][2]+1 do sz = sz + waveEnv[i][AX] end
-   sz = math.floor(sz * SCALEX)
-   return st, sz
-end
-
 function paintXyPad(control, value)
 
-   local bounds = control:getBounds()
-   g.setColor(0x0000)
-   g.fillRect(0, 0, bounds[WIDTH], bounds[HEIGHT])
+  local bounds = control:getBounds()
+  g.setColor(0x0000)
+  g.fillRect(0, 0, bounds[WIDTH], bounds[HEIGHT])
 
-   g.setColor(STD_COLOR)
-   g.drawRect(0, WIN_OFST, bounds[WIDTH], bounds[HEIGHT]-WIN_OFST)
+  g.setColor(STD_COLOR)
+  g.drawRect(0, WIN_OFST, bounds[WIDTH], bounds[HEIGHT]-WIN_OFST)
 
-   local strt, lnth = loopCalc(1)
-   g.setColor(envLoop[1][4])
-   if SHOW_LOOP_GUIDES then
-      if (envLoop[1][3] == true) then
-         g.fillRect(strt, 35, lnth, 10)
-      else
-         local keyRel = 0
-         for j=1,envLoop[1][2]-1 do keyRel = keyRel + waveEnv[j][AX] end
-         keyRel = math.floor(keyRel * SCALEX) + SUSTAIN
-         g.fillRect(keyRel-5, 35, 10, 10)
-      end
-   end
+  local xPos = 0
+  local yPos = XY_PAD_HEIGHT
+  for i=1,NUMPTS do
+    local xScale = math.floor(waveEnv[i][AX] * SCALEX)
+    local yScale = clamp(waveEnv[i][AY] + WENV_Y_DRAW_NUDGE, LEVEL_MIN, LEVEL_MAX) * SCALEY
+    local ym1Scale = clamp(((i > 1) and waveEnv[i-1][AY] or waveEnv[0][AY]) + WENV_Y_DRAW_NUDGE, LEVEL_MIN, LEVEL_MAX) * SCALEY
+    g.setColor(waveEnv[i][CLR])
+    g.fillCircle(xPos + xScale, yPos - yScale, 10)
 
-   local xPos = 0
-   local yPos = XY_PAD_HEIGHT
-   for i=1,NUMPTS do
-      local xScale = math.floor(waveEnv[i][AX] * SCALEX)
-      local yScale = clamp(waveEnv[i][AY] + WENV_Y_DRAW_NUDGE, LEVEL_MIN, LEVEL_MAX) * SCALEY
-      local ym1Scale = clamp(((i > 1) and waveEnv[i-1][AY] or waveEnv[0][AY]) + WENV_Y_DRAW_NUDGE, LEVEL_MIN, LEVEL_MAX) * SCALEY
-      g.setColor(waveEnv[i][CLR])
-      g.fillCircle(xPos + xScale, yPos - yScale, 10)
+    g.setColor(STD_COLOR)
+    g.drawLine(xPos, yPos - ym1Scale, xPos + xScale, yPos - yScale)
 
-      g.setColor(STD_COLOR)
-      g.drawLine(xPos, yPos - ym1Scale, xPos + xScale, yPos - yScale)
+    xPos = xPos + xScale
 
-      xPos = xPos + xScale
+  end
 
-      if SHOW_LOOP_GUIDES then
-         if (i == envLoop[1][2]-1) and (envLoop[1][3] == false) then
-            g.drawLine(xPos, yPos - yScale, xPos + SUSTAIN, yPos - yScale)
-            xPos = xPos + SUSTAIN
-         end
-      end
-   end
-
-   printValues()
+  printValues()
 end
 
 function touchCallback(control, touchEvent)
-   local endPt = NUMPTS + 1
-   local tolerance = 25
+  local endPt = NUMPTS + 1
+  local tolerance = 25
 
-   if touchEvent.type == MOVE then
-      if (touchEvent.y < WIN_OFST) then return end
+  if touchEvent.type == MOVE then
+    if (touchEvent.y < WIN_OFST) then return end
 
-      local preX = 0
-      for i=1,activePt-1 do preX = preX + waveEnv[i][AX] end
+    local preX = 0
+    for i=1,activePt-1 do preX = preX + waveEnv[i][AX] end
 
       local postX = preX + waveEnv[activePt][AX]
       if (activePt ~= endPt) then postX = postX + waveEnv[activePt+1][AX] end
@@ -1259,44 +1243,41 @@ function touchCallback(control, touchEvent)
          parameterMap.set(1, PT_VIRTUAL, UI_LEVEL_EDIT, l)
       end
 
-   elseif touchEvent.type == DOWN then
-      local i = 1
-      local xPos = 0
-      local yPos = XY_PAD_HEIGHT
+  elseif touchEvent.type == DOWN then
+    local i = 1
+    local xPos = 0
+    local yPos = XY_PAD_HEIGHT
 
-      if (touchEvent.y >= WIN_OFST) then
-         local minDist = math.huge
-         local closestPt = endPt
+    if (touchEvent.y >= WIN_OFST) then
+      local minDist = math.huge
+      local closestPt = endPt
 
-         while (i < endPt) do
-            local xScale = math.floor(waveEnv[i][AX] * SCALEX)
-            if (envLoop[1][3] == false) and (i == envLoop[1][2]) then
-               xScale = xScale + SUSTAIN
-            end
-            local yScale = clamp(waveEnv[i][AY] + WENV_Y_DRAW_NUDGE, LEVEL_MIN, LEVEL_MAX) * SCALEY
-            local dist = math.sqrt((touchEvent.x - (xPos + xScale))^2 + (touchEvent.y - (yPos - yScale))^2)
-            if dist < minDist then
-               minDist = dist
-               closestPt = i
-            end
+      while (i < endPt) do
+        local xScale = math.floor(waveEnv[i][AX] * SCALEX)
+        local yScale = clamp(waveEnv[i][AY] + WENV_Y_DRAW_NUDGE, LEVEL_MIN, LEVEL_MAX) * SCALEY
+        local dist = math.sqrt((touchEvent.x - (xPos + xScale))^2 + (touchEvent.y - (yPos - yScale))^2)
+        if dist < minDist then
+          minDist = dist
+          closestPt = i
+        end
 
-            xPos = xPos + xScale
-            i = i + 1
-         end
-
-         if minDist <= tolerance then i = closestPt else i = endPt end
-      else
-         i = endPt
+        xPos = xPos + xScale
+        i = i + 1
       end
 
-      if (activePt ~= endPt) then waveEnv[activePt][CLR] = STD_COLOR end
-      if (i ~= endPt) then waveEnv[i][CLR] = ACT_COLOR end
+      if minDist <= tolerance then i = closestPt else i = endPt end
+    else
+      i = endPt
+    end
 
-      activePt = i
-      parameterMap.set(1, PT_VIRTUAL, UI_STAGE_SELECT, math.min(activePt, endPt))
-   end
+    if (activePt ~= endPt) then waveEnv[activePt][CLR] = STD_COLOR end
+    if (i ~= endPt) then waveEnv[i][CLR] = ACT_COLOR end
 
-   control:repaint()
+    activePt = i
+    parameterMap.set(1, PT_VIRTUAL, UI_STAGE_SELECT, math.min(activePt, endPt))
+  end
+
+  control:repaint()
 end
 
 function dispDot(valueObject, value)
@@ -1397,26 +1378,6 @@ function syncWaveEnvFromVisibleCaches()
     if l ~= nil then waveEnv[i][AY] = clamp(l, LEVEL_MIN, LEVEL_MAX) end
   end
 
-  -- sync loop controls from the same visible cache
-  local loopState = srcPart[LOOP_STATE_NRPN_BASE + off]
-  if loopState == nil then loopState = srcSingle[LOOP_STATE_NRPN_BASE + off] end
-
-  local loopStart = srcPart[LOOP_START_NRPN_BASE + off]
-  if loopStart == nil then loopStart = srcSingle[LOOP_START_NRPN_BASE + off] end
-
-  local loopEnd = srcPart[LOOP_END_NRPN_BASE + off]
-  if loopEnd == nil then loopEnd = srcSingle[LOOP_END_NRPN_BASE + off] end
-
-  if loopState ~= nil then
-    envLoop[1][3] = (loopState == 1)
-  end
-  if loopStart ~= nil then
-    envLoop[1][1] = clamp(loopStart, 1, WAVEPTS)
-  end
-  if loopEnd ~= nil then
-    envLoop[1][2] = clamp(loopEnd, envLoop[1][1], WAVEPTS)
-  end
-
   -- keep edit knobs in sync with selected point
   if activePt >= 1 and activePt <= WAVEPTS then
     isApplyingCache = true
@@ -1447,22 +1408,28 @@ end
 
 -- Single-loop handlers (controls for loop state/start/end)
 function setState(valueObject, value)
-   envLoop[1][3] = (value == 1)
-   txLoopState(envLoop[1][3])
-   xyPadControl:repaint()
+   local isOn = (value == 1)
+   txLoopState(isOn)
 end
 
 function setStart(valueObject, value)
-   envLoop[1][1] = clamp(value, 1, WAVEPTS)
-   if (envLoop[1][2] < envLoop[1][1]) then envLoop[1][2] = envLoop[1][1] end
-   txLoopStart(envLoop[1][1])
-   xyPadControl:repaint()
+   local offset = getLoopEnvelopeTarget()
+   local endValue = parameterMap.get(deviceId, PT_VIRTUAL, LOOP_END_NRPN_BASE + offset) or 6
+   
+   if value >= endValue then
+      value = math.max(1, endValue - 1)
+   end
+   txLoopStart(value)
 end
 
 function setEnd(valueObject, value)
-   envLoop[1][2] = clamp(value, envLoop[1][1], WAVEPTS)
-   txLoopEnd(envLoop[1][2])
-   xyPadControl:repaint()
+   local offset = getLoopEnvelopeTarget()
+   local startValue = parameterMap.get(deviceId, PT_VIRTUAL, LOOP_START_NRPN_BASE + offset) or 1
+   
+   if value <= startValue then
+      value = math.min(6, startValue + 1)
+   end
+   txLoopEnd(value)
 end
 
 --------------------------------------------------------------------------------

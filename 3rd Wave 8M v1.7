@@ -949,6 +949,15 @@ local function resendVisibleToSynth()
 end
 
 --------------------------------------------------------------------------------
+-- Name cleanup helper
+--------------------------------------------------------------------------------
+local function cleanPatchName(s)
+  s = s:gsub("%z", "")
+  s = s:gsub("%s+$", "")
+  return s
+end
+
+--------------------------------------------------------------------------------
 -- sysEx data received
 --------------------------------------------------------------------------------
 
@@ -1090,18 +1099,45 @@ local function clamp(v, lo, hi)
    return math.max(lo, math.min(hi, v))
 end
 
+local function updateActiveWaveEnvEditCache(parNum, value)
+   if isApplyingCache or getCompareMode() then return end
+
+   local partSel = getPartSel()
+   if partSel == 2 then
+      part2Edit[parNum] = value
+   else
+      part1Edit[parNum] = value
+   end
+end
+
 local function txStageTime(stage, value)
-   local nrpn = STAGE_TIME_NRPN[stage] + envOffset
+   local baseNrpn = STAGE_TIME_NRPN[stage]
+   if baseNrpn == nil then return end
+
    local v = clamp(value, TIME_MIN, TIME_MAX)
-   sendNRPN(channel, nrpn, v)
-   dprint(string.format("NRPN TX env=%d stage=%d TIME nrpn=%d val=%d", targetEnv, stage, nrpn, v))
+   local nrpn = baseNrpn + envOffset
+   local partSel = getPartSel()
+   local outNrpn = toSynthParNumForPart(nrpn, partSel)
+   local ch = resolvePartChannel(partSel)
+
+   updateActiveWaveEnvEditCache(nrpn, v)
+   sendNRPN(ch, outNrpn, v)
+   dprint(string.format("NRPN TX part=%d env=%d stage=%d TIME nrpn=%d val=%d", partSel, targetEnv, stage, outNrpn, v))
 end
 
 local function txStageLevel(stage, value)
-   local nrpn = STAGE_LEVEL_NRPN[stage] + envOffset
+   local baseNrpn = STAGE_LEVEL_NRPN[stage]
+   if baseNrpn == nil then return end
+
    local v = clamp(value, LEVEL_MIN, LEVEL_MAX)
-   sendNRPN(channel, nrpn, v)
-   dprint(string.format("NRPN TX env=%d stage=%d LEVEL nrpn=%d val=%d", targetEnv, stage, nrpn, v))
+   local nrpn = baseNrpn + envOffset
+   local partSel = getPartSel()
+   local outNrpn = toSynthParNumForPart(nrpn, partSel)
+   local ch = resolvePartChannel(partSel)
+
+   updateActiveWaveEnvEditCache(nrpn, v)
+   sendNRPN(ch, outNrpn, v)
+   dprint(string.format("NRPN TX part=%d env=%d stage=%d LEVEL nrpn=%d val=%d", partSel, targetEnv, stage, outNrpn, v))
 end
 
 local function txLoopState(isOn)
@@ -1333,6 +1369,16 @@ local function getVisibleCaches()
   return srcSingle, srcPart
 end
 
+local function getVisibleCaches()
+  local partSel = getPartSel()
+  local cmp = getCompareMode()
+  local srcSingle = cmp and singleBase or singleEdit
+  local srcPart = (partSel == 2)
+      and (cmp and part2Base or part2Edit)
+      or  (cmp and part1Base or part1Edit)
+  return srcSingle, srcPart
+end
+
 function syncWaveEnvFromVisibleCaches()
   local srcSingle, srcPart = getVisibleCaches()
   local off = envOffset or 0
@@ -1341,7 +1387,6 @@ function syncWaveEnvFromVisibleCaches()
     local tPar = WENV_TIME_BASE[i] + off
     local lPar = WENV_LEVEL_BASE[i] + off
 
-    -- part cache first, fallback to single cache
     local t = srcPart[tPar]
     if t == nil then t = srcSingle[tPar] end
 
@@ -1350,6 +1395,26 @@ function syncWaveEnvFromVisibleCaches()
 
     if t ~= nil then waveEnv[i][AX] = clamp(t, TIME_MIN, TIME_MAX) end
     if l ~= nil then waveEnv[i][AY] = clamp(l, LEVEL_MIN, LEVEL_MAX) end
+  end
+
+  -- sync loop controls from the same visible cache
+  local loopState = srcPart[LOOP_STATE_NRPN_BASE + off]
+  if loopState == nil then loopState = srcSingle[LOOP_STATE_NRPN_BASE + off] end
+
+  local loopStart = srcPart[LOOP_START_NRPN_BASE + off]
+  if loopStart == nil then loopStart = srcSingle[LOOP_START_NRPN_BASE + off] end
+
+  local loopEnd = srcPart[LOOP_END_NRPN_BASE + off]
+  if loopEnd == nil then loopEnd = srcSingle[LOOP_END_NRPN_BASE + off] end
+
+  if loopState ~= nil then
+    envLoop[1][3] = (loopState == 1)
+  end
+  if loopStart ~= nil then
+    envLoop[1][1] = clamp(loopStart, 1, WAVEPTS)
+  end
+  if loopEnd ~= nil then
+    envLoop[1][2] = clamp(loopEnd, envLoop[1][1], WAVEPTS)
   end
 
   -- keep edit knobs in sync with selected point
@@ -1361,6 +1426,7 @@ function syncWaveEnvFromVisibleCaches()
   end
 
   if xyPadControl then xyPadControl:repaint() end
+
 end
 
 -- bind your env-target selector control callback to this (values 1..3)
@@ -1451,17 +1517,18 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
       controls.get(UNISON2_CTRL):setSlot(19, CTRL_PAGE)
     end
 
-    repaintFromVisibleCaches()
+    repaintFromVisibleCaches()  -- update param values (part1/part2)
     syncWtUiFromSynthParams()
     if syncWaveEnvFromVisibleCaches then syncWaveEnvFromVisibleCaches() end
     return
   end
 
   if pType == PT_VIRTUAL and pNum == COMPARE_IT then
-    repaintFromVisibleCaches()
+    repaintFromVisibleCaches() -- update param values (original/edited)
     syncWtUiFromSynthParams()
     if syncWaveEnvFromVisibleCaches then syncWaveEnvFromVisibleCaches() end
-    resendVisibleToSynth() -- comment out for visual-only compare
+    if xyPadControl then xyPadControl:repaint() end
+    resendVisibleToSynth() -- update the synth (origibnal/edited)
     return
   end
 

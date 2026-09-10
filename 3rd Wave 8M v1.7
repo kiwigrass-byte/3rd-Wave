@@ -3,6 +3,7 @@
 -- by @kiwigrass
 
 -- TODO: implement global settings request when protocol is confirmed
+-- local channelsFromSynth = true
 
 -- a debug helper. remove later
 local DEBUG = false
@@ -12,11 +13,28 @@ local function dprint(msg)
 end
 
 -------------------------------- Global Constants -----------------------------
+--
+--------------------------------------------------------------------------------
 -- 3rd wave model id number: 0x01 for 24 voice products, 0x02 for 8 voice
 local MODEL_BYTE = 0x02
 
 -- header for 3rd Wave sysEx messages (will recognize either model id byte)
 local SYSEX_HEADER = {0x00,0x02,0x4A,0x02}
+
+-- page references ---
+local CTRL_PAGE = 1
+local OSC_PAGE  = 2
+local W_ENV_PAGE = 6
+
+-- a tag to keep track of versions of patch-banks on the 3rd Wave 
+local PERSIST_TAG = "3rdWaveProgNamesV1"
+
+-- timer tick rate --
+local TICK_RATE = 300
+
+-- other constants --
+local bankTxt={"B1","B2","B3","B4","B5"} 
+local authorDate = "kiwigrass 2026" 
 
 ------------ virtual parameter numbers ----------------
 local BANK_NUMBER = 10032
@@ -55,7 +73,10 @@ local UI_ENV_EDIT_1 = 45
 local UI_ENV_EDIT_2 = 46
 local UI_ENV_EDIT_3 = 47
 
--------------- ctrl ids ---------------------
+-- sequencer start/stop parameter
+local SEQ_START_STOP = 10043
+
+---------------- ctrl ids -----------------------
 -- program number ctrl id
 local CTRL_PROG_NUMBER = 3
 
@@ -95,6 +116,7 @@ local LOOP_END_CTRL = 254
 local XY_PAD_CTRL = 116
 
 ------------ Wave Envelope UI constants ----------
+
 local WAVEPTS = 6
 local NUMPTS  = WAVEPTS
 local TIME_MIN = 0
@@ -139,20 +161,7 @@ local FX2_VIS = {
   [13] = {true, true, true, true, true, true, true, false, false, false, false, false}, -- shimmer reverb
 }
 
--- page references ---
-local CTRL_PAGE = 1
-local OSC_PAGE  = 2
-local W_ENV_PAGE = 6
-
--- a tag to keep track of versions of patch-banks on the 3rd Wave 
-local PERSIST_TAG = "3rdWaveProgNamesV1"
-
--- other constants --
-local bankTxt={"B1","B2","B3","B4","B5"} 
-local authorDate = "kiwigrass 2026" 
-
----------- data tables ------------------------
-
+------------------ data tables ------------------------
 -- wavetable labels
 local WAVETABLE = {
   -- PPG: 0..35
@@ -249,7 +258,7 @@ local part2Channel = devices.get(3):getChannel()
 info.setText(authorDate)
 
 -- Set timer tick rate (e.g., every 200 milliseconds) 
-timer.setPeriod(300) 
+timer.setPeriod(TICK_RATE) 
 
 -- Cached synth states (key = parNum, value = 14-bit value)
 local singleBase, part1Base, part2Base = {}, {}, {}
@@ -261,7 +270,6 @@ local isApplyingCache = false
 -- 3rd Wave-reported channels (source of truth when available)
 local wavePart1Ch = nil
 local wavePart2Ch = nil
-local channelsFromSynth = true
 
 -- initialize number of wavetables by type 
 local ppgNumber = 0
@@ -1496,7 +1504,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   ----------------------------------------------------------------------
   -- 3) Sequencer start/stop
   ----------------------------------------------------------------------
-  if pType == PT_VIRTUAL and pNum == 10043 then
+  if pType == PT_VIRTUAL and pNum == SEQ_START_STOP then
     if midiValue == 1 then
       midi.sendMessage(port, { type = START })
     else

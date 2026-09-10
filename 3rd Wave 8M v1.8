@@ -1,0 +1,1623 @@
+-- Preset for Groove Synth 3rd Wave 8M
+-- September 2026
+-- by @kiwigrass
+
+-- TODO: implement global settings request when protocol is confirmed
+-- local channelsFromSynth = true
+
+-- a debug helper. remove later
+local DEBUG = false
+
+local function dprint(msg)
+   if DEBUG then print(msg) end
+end
+
+-------------------------------- Global Constants -----------------------------
+--
+--------------------------------------------------------------------------------
+-- 3rd wave model id number: 0x01 for 24 voice products, 0x02 for 8 voice
+local MODEL_BYTE = 0x02
+
+-- header for 3rd Wave sysEx messages (will recognize either model id byte)
+local SYSEX_HEADER = {0x00,0x02,0x4A,0x02}
+
+-- page references ---
+local CTRL_PAGE = 1
+local OSC_PAGE  = 2
+local W_ENV_PAGE = 6
+
+-- a tag to keep track of versions of patch-banks on the 3rd Wave 
+local PERSIST_TAG = "3rdWaveProgNamesV1"
+
+-- timer tick rate --
+local TICK_RATE = 400
+
+-- other constants --
+local bankTxt={"B1","B2","B3","B4","B5"} 
+local authorDate = "kiwigrass 2026" 
+
+------------ virtual parameter numbers ----------------
+local BANK_NUMBER = 10032
+local PROG_NUMBER = 10033
+local PART_SELECT = 10029 -- not nrpn 69 which displays part info on 3rd Wave's screen
+local COMPARE_IT = 10039
+local FX1_TYPE = 227
+local FX2_TYPE = 231
+
+-- UI wavetable params (visible controls), one per oscillator
+local WT_UI_PARAMS    = {10040, 10041, 10042}
+
+-- Synth wavetable params (actual NRPN-mapped virtual params) stored on hidden page
+local WT_SYNTH_PARAMS = {102,   103,   104}
+
+-- toggle for part1 and part 2 unison modes
+local UNISON1_PARAM = 397
+local UNISON2_PARAM = 398
+
+---- wave envelope parameters ----------
+local UI_STAGE_SELECT = 5008
+local UI_TIME_EDIT    = 5009
+local UI_LEVEL_EDIT   = 5010
+local UI_ENV_TARGET   = 5011   -- envelope target selector: 1..3
+
+-- Wave-envelope synth param bases (env 1); env 2/3 use +1/+2 via envOffset
+local WENV_TIME_NRPN_BASE  = {134, 137, 140, 143, 146, 149}
+local WENV_LEVEL_NRPN_BASE = {265, 268, 271, 274, 277, 280}
+
+local LOOP_STATE_NRPN_BASE = {234, 235, 236}
+local LOOP_START_NRPN_BASE = {155, 156, 157}
+local LOOP_END_NRPN_BASE   = {152, 153, 154}
+
+-- hidden wave env edit buttons --
+local UI_ENV_EDIT_1 = 45
+local UI_ENV_EDIT_2 = 46
+local UI_ENV_EDIT_3 = 47
+
+-- sequencer start/stop parameter
+local SEQ_START_STOP = 10043
+
+---------------- ctrl ids -----------------------
+-- program number ctrl id
+local CTRL_PROG_NUMBER = 3
+
+-- osc control ids
+local CTRL_PULSE  = {27,28,29}
+local CTRL_OFFSET = {30,31,32}
+
+-- sync control ids
+local CTRL_LFO1_SYNC = 226
+local CTRL_LFO2_SYNC = 329
+local CTRL_LFO3_SYNC = 227
+local CTRL_LFO4_SYNC = 228
+local CTRL_FX1_SYNC = 324
+local CTRL_FX2_SYNC = 326
+
+-- unison control (exc switch) ids
+local CTRL_UNISON1 = {60,66,61,63,46}
+local CTRL_UNISON2 = {412,413,414,415,416}
+
+-- unison toggle control ids
+local UNISON1_CTRL  = 59
+local UNISON2_CTRL  = 411
+
+-- all FX param control ids -- shown/hidden as needed
+local CTRL_FX1_IDS = {311,312,313,428, 430,431,432} 
+local CTRL_FX2_IDS = {315,316,317,318,319,320,58, 433,434,437,435,436} 
+
+-- Default FX param controls -- for name updates. Other FX controls have hard coded names
+local CTRL_FX1_NAME_IDS = {311,312,313,428} 
+local CTRL_FX2_NAME_IDS = {315,316,317,318,319,320,58} 
+
+-- wave envelope control ids
+local W_ENV_STAGE_CTRL = 270
+local LOOP_STATE_CTRL = 252
+local LOOP_START_CTRL = 253
+local LOOP_END_CTRL = 254
+local XY_PAD_CTRL = 116
+
+------------ Wave Envelope UI constants ----------
+
+local WAVEPTS = 6
+local NUMPTS  = WAVEPTS
+local TIME_MIN = 0
+local TIME_MAX = 127
+local LEVEL_MIN = 0
+local LEVEL_MAX = 63
+local WIN_OFST = 70
+local SUSTAIN  = 64
+local SCALEX   = 0.90625
+local SCALEY   = 3
+local AX  = 1
+local AY  = 2
+local CLR = 3
+
+local STD_COLOR = 0xB0C0
+local ACT_COLOR = 0xFF0000 -- Red
+local ON_COLOR  = 0x32CD32 -- Green
+
+-- ---------- wave envelope UI Geometry ----------
+local DRAW_H = 220
+local XY_PAD_WIDTH  = math.floor((128 * SCALEX * WAVEPTS) + SUSTAIN + 0.5)
+local XY_PAD_HEIGHT = math.floor(DRAW_H + WIN_OFST + 0.5)
+
+-- visual y-axis offset (in wave-env units, same 0..63 position domain)
+local WENV_Y_DRAW_NUDGE = 3
+
+-- slot reference for pulse width control ---
+local TARGET_SLOT = {4,16,28}
+-- slot reference for unison controls
+local SLOT_UNISON1 = {[60]=20,[66]=21,[61]=22,[63]=23,[46]=24}
+local SLOT_UNISON2 = {[412]=20,[413]=21,[414]=22,[415]=23,[416]=24}
+
+-- Visibility map for CTRL_FX1_IDS and CTRL_FX2_IDS -----------------
+local FX1_VIS = {
+  [7] = {true, false, true, false, true, false, false}, -- leslie 
+  [8] = {true, false, false, true, false, true, true }, -- ring mod
+}
+local FX2_VIS = {
+  [3] = {true, true, true, true, true, false, false, false, false, false, false, true}, -- echoplex  
+  [8] = {true, false, true, false, false, false, false, true, false, false, false, false}, -- leslie 
+  [9] = {true, false, false, false, false, false, false, false, true, true, true, false}, -- ring mod
+  [13] = {true, true, true, true, true, true, true, false, false, false, false, false}, -- shimmer reverb
+}
+
+------------------ data tables ------------------------
+-- wavetable labels
+local WAVETABLE = {
+  -- PPG: 0..35
+  [0]="Wavetable P00","Wavetable P01","Wavetable P02","Wavetable P03","Wavetable P04","Wavetable P05","Wavetable P06","Wavetable P07","Wavetable P08","Wavetable P09","Wavetable P10","Wavetable P11","Wavetable P12","Wavetable P13","Wavetable P14",
+      "Wavetable P15","Wavetable P16","Wavetable P17","Wavetable P18","Wavetable P19","Wavetable P20","Wavetable P21","Wavetable P22","Wavetable P23","Wavetable P24","Wavetable P25","Wavetable P26","Wavetable P27","Wavetable P28","Wavetable P29",
+      "Wavetable P30","Wavetable P31","Wavetable P32","Wavetable P33","VS_0-63","VS_64-127",
+  -- USER: 128..183
+  [128]="Additive_Bell_17", [129]="HumanVowelSweep", [130]="DrewWave", [131]="GrooveSynthesis-WaveTable_BC", [132]="Flute-Harmonics", [133]="CoolFMDirty-WaveTable_DN", [134]="BID700E-WaveTable_KK", [135]="KnobGrotto6-WaveTable_DN", [136]="Burble-WaveTable_DN",
+  [137]="PrimefallOctaveDirty96k-WaveTable_DN", [138]="MultiWave96k-WaveTable_DN", [139]="MetalSweep96k-WaveTable_DN", [140]="ZigZag", [141]="RandomWaves-KK", [142]="CrossoverHMXdirty-WaveTable_DN", [143]="LowSquareSync-WaveTable_DN",
+  [144]="RippinStrange-WaveTable_DN", [145]="Buchla208cB-td_KK", [146]="FIIx_Arr1", [147]="Ringshifted96k-WaveTable_DN", [148]="Fairlight_Harmonic_Doodle", [149]="FiveOscComb-WaveTable_DN", [150]="HarmonicSpreadClip-WaveTable_DN",
+  [151]="14DirtySweep2_96k-WaveTable_DN", [152]="BarberpoleTurbosaw-WaveTable_DN", [153]="Science_Channel", [154]="Metal_Bubbles", [155]="DrumWaveTables-WaveTable_KK", [156]="Fuzzbomb96k-WaveTable_DN", [157]="Ooo_Aah_Sweep", [158]="Prime_Fall-WaveTable",
+  [159]="RingshiftedB96k-WaveTableDN", [160]="KnobGrottoArp16-WaveTable_DN", [161]="Fairlight_Mode1_Loop", [162]="Fairlight_Mode1_Riser", [163]="Ring_Shift_C", [164]="Turbo_Bubbles", [165]="Harmonic_Dirt_Spread", [166]="TurboHamRadio",
+  [167]="Addivie_Bell_Lower", [168]="ResVactrolSquare", [169]="208 Easel 76-H-WaveTable", [170]="Keyumay", [171]="Arp_4072_Saw", [172]="Arp_4072_Square", [173]="Buchla296eSpectra5-WaveTable", [174]="Buchla259Dmx7-WaveTable",
+  [175]="208c 20-A-WaveTable", [176]="FM_Crush", [177]="Synclav_FM_1", [178]="Dub_Grind", [179]="SineFold", [180]="Big_Bang", [181]="Synclav_5", [182]="Additive_8_Bit", [183]="Harmonic_Aah",
+  -- ANALOG: 256..262
+  [256]="Sawtooth",[257]="Square",[258]="SuperSaw",[259]="Sine",[260]="-> Pink Noise",[261]="-> Blue Noise",[262]="Triangle",
+  -- SAMPLE: 512..522
+  [512]="Drums Vinyl Subs&Snares",[513]="Drums Vinyl Cymbals&Toms",[514]="TubeBell",[515]="Marine vocal 3",[516]="mT Kit",[517]="Kalimba",[518]="CowbellNote",[519]="Electric Bass EQ",[520]="808 Kit",[521]="Hanger Drums",[522]="S10"
+}
+
+-- Real synth ranges (change only these if firmware/library changes)
+local WT_SEGMENTS = {
+  { tag="P", synthStart=0,   count=36 }, -- can be up to 48
+  { tag="U", synthStart=128, count=56 }, -- can be up to 64
+  { tag="A", synthStart=256, count=7  },
+  { tag="WM", synthStart=384, count=1  },
+  { tag="S", synthStart=512, count=11 },
+}
+
+-- mod matrix destination labels
+local DESTINATION = {[0]="Destination off","osc 1 freq","osc 2 freq","osc 3 freq","osc all freq","osc 1 level","osc 2 level", "osc 3 level","osc all level", "osc 1 wave env","osc 2 wave env","osc 3 wave env","osc all wave env",
+    "osc 1 FM amount", "osc2 FM amount","osc3 FM amount", "osc all FM amount", "osc 1 drift", "osc 2 drift", "osc 3 drift", "osc all drift", "osc 1 PW", "osc 2 PW", "osc 3 PW", "osc all PW", "LPF drive", "LPF cutoff", 
+    "LPF resonance", "not used", "SVF cutoff","SVF resonance", "SVF mode", "LFO 1 freq", "LFO 2 freq", "LFO 3 freq", "LFO 4 freq", "LFO all freq", "LFO 1 amount", "LFO 2 amount", "LFO 3 amount", "LFO 4 amount", "LFO all amount", 
+    "LPF env amount", "amp env amount","env 3 amount", "env 4 amount", "SVF env amount", "wave env amount", "all env amount", "f-env attack", "a-env attack", "env 3 attack", "env 4 attack", "env all attack", "f-env decay",
+    "a-env decay", "env 3 decay", "env 4 decay", "env all decay", "f-env sustain", "a-env sustain", "env 3 sustain", "env 4 sustain", "env all sustain", "f-env release", "a-env release", "env 3 release", "env 4 release",
+    "env all release", "w-env o1/t1", "w-env o2/t1", "w-env o3/t1", "w-env o1/t2", "w-env o2/t2", "w-env o3/t2", "w-env o1/t3", "w-env o2/t3", "w-env o3/t3", "w-env o1/t4", "w-env o2/t4", "w-env o3/t4", "w-env o1/t5", "w-env o5/t5",
+    "w-env o3/t5", "w-env o1/t6", "w-env o2/t6", "w-env o3/t6", "w-env o1/p1", "w-env o2/p1", "w-env o3/p1", "w-env o1/p2", "w-env o2/p2", "w-env o3/p2", "w-env o1/p3", "w-env o2/p3", "w-env o3/p3", "w-env o1/p4", "w-env o2/p4",
+    "w-env o3/p4", "w-env o1/p5", "w-env o2/p5", "w-env o3/p5", "w-env o1/p6", "w-env o2/p6", "w-env o3/p6", "pan spread", "effect 1 mix", "effect 1 par 1", "effect 1 par 2", "effect 1 par 3", "effect 2 mix", "effect 2 par 1", 
+    "effect 2 par 2", "effect 2 par 3", "osc 1 fine", "osc 2 fine", "osc 3 fine", "osc all fine", "mod 1 amount", "mod 2 amount", "mod 3 amount", "mod 4 amount", "mod 5 amount", "mod 6 amount", "mod 7 amount", "mod 8 amount", "smpl start time",
+}
+
+-- mod matrix source labels
+local SOURCE = {[0]="Source off","osc 1","osc 2","osc 3","filter envelope","amp envelope","LFO 1", "LFO 2","LFO 3", "LFO 4","envelope 3","envelope 4","osc1 wave env", "osc 2 wave env", "osc 3 wave env", "PB wheel", "Mod wheel",
+    "velocity", "pressure", "foot pedal", "midi expression", "note number", "random", "DC", "noise", "audio out", "audio in", "MPE PB", "MPE Y axis", "midi breath ctrl",
+}
+
+-- FX1 (PARAM_227 type select, PARAM_228 sync, params 324/325/326 plus 345)
+local FX1_SPEC = {
+  [0]  = { name="BYPASS", params={ [1]={label="PARAM 1"}, [2]={label="PARAM 2"}, [3]={label="PARAM 3"},  }},
+  [1]  = { name="BBD DELAY", syncParam=228, params={ [1]={label="TIME"}, [2]={label="FEEDBACK"}, [3]={label="CUT OFF"},  }},
+  [2]  = { name="STEREO DELAY", syncParam=228, params={ [1]={label="TIME"}, [2]={label="FEEDBACK"}, [3]={label="CUT OFF"},  }},
+  [3]  = { name="CHORUS", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="TONE"}, }},
+  [4]  = { name="PHASER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACK"}, }},
+  [5]  = { name="FLANGER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACK"}, }},
+  [6]  = { name="DISTORTION", params={ [1]={label="GAIN AMOUNT" }, [2]={label="TONE" }, [3]={label="OUTPUT LEVEL"},  }},
+  [7]  = { name="LESLIE SPEAKER", params={ [1]={label="DRIVE" }, [2]={label="SPEED" }, [3]={label="DISTANCE" },  }},
+  [8]  = { name="RING MOD", params={ [1]={label="FREQ" }, [2]={label="PITCH TRACK" }, [3]={label="CARRIER"  }, [4]={label="PITCH TRK W/REL" },  }},
+
+}
+
+-- FX2 (PARAM_231 type select, PARAM_232 sync, params 328/329/330 plus 348/349/350/466)
+local FX2_SPEC = {
+  [0]  = { name="BYPASS", params={ [1]={label="PARAM 1"}, [2]={label="PARAM 2"}, [3]={label="PARAM 3"},  }},
+  [1]  = { name="BBD DELAY", syncParam=228, params={ [1]={label="TIME"}, [2]={label="FEEDBACK"}, [3]={label="CUT OFF"},  }},
+  [2]  = { name="STEREO DELAY", syncParam=228, params={ [1]={label="TIME"}, [2]={label="FEEDBACK"}, [3]={label="CUT OFF"},  }},
+  [3]  = { name="Echoplex", params={ [1]={label="TIME" }, [2]={label="FEEDBACK" }, [3]={label="WOW&FLUTTER"  }, [4]={label="REC LEVEL" }, [5]={label="HEAD ALIGN" }, [6]={label="TAPE HISS"  }, }},
+  [4]  = { name="CHORUS", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="TONE"}, }},
+  [5]  = { name="PHASER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACK"}, }},
+  [6]  = { name="FLANGER", params={ [1]={label="DEPTH"}, [2]={label="RATE"}, [3]={label="FEEDBACK"}, }},
+  [7]  = { name="DISTORTION", params={ [1]={label="GAIN AMOUNT" }, [2]={label="TONE" }, [3]={label="OUTPUT LEVEL"},  }},
+  [8]  = { name="LESLIE SPEAKER", params={ [1]={label="DRIVE" }, [2]={label="SPEED" }, [3]={label="DISTANCE" },  }},
+  [9]  = { name="RING MOD", params={ [1]={label="FREQ" }, [2]={label="PITCH TRACK" }, [3]={label="CARRIER"  }, [4]={label="PITCH TRK W/REL" },  }},
+  [10] = { name="ROOM REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="CUT OFF" }, [3]={label="EARLY AMOUNT" },  }},
+  [11] = { name="HALL REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="CUT OFF" }, [3]={label="EARLY AMOUNT" },  }},
+  [12] = { name="PLATE REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="CUT OFF" }, [3]={label="EARLY AMOUNT" },  }},
+  [13] = { name="SHIMMER REVERB", params={ [1]={label="REVERB TIME" }, [2]={label="PITCH AMOUNT" }, [3]={label="LP/HP CUTOFF" }, [4]={label="BLOOM SPEED" }, [5]={label="HF DAMPING" }, [6]={label="PRE DELAY" }, [7]={label="FEEDBACK" }, }},
+}
+
+-- events supscription
+events.subscribe(PAGES | POTS)
+
+--  Device information 
+local currentDevice  = devices.get(1)
+local deviceId = currentDevice:getId()
+local channel = currentDevice:getChannel ()
+local port      = currentDevice:getPort ()
+
+devices.create(2, "Part 1", port, 1)
+devices.create(3, "Part 2", port, 2)
+local part1Channel = devices.get(2):getChannel ()
+local part2Channel = devices.get(3):getChannel()
+
+-- populate the bottom RH screen information display on load
+info.setText(authorDate)
+
+-- Set timer tick rate (e.g., every 200 milliseconds) 
+timer.setPeriod(TICK_RATE) 
+
+-- Cached synth states (key = parNum, value = 14-bit value)
+local singleBase, part1Base, part2Base = {}, {}, {}
+local singleEdit, part1Edit, part2Edit = {}, {}, {}
+
+-- Guard to prevent onChange recursion during repaint
+local isApplyingCache = false
+
+-- 3rd Wave-reported channels (source of truth when available)
+local wavePart1Ch = nil
+local wavePart2Ch = nil
+
+-- initialize number of wavetables by type 
+local ppgNumber = 0
+local userNumber = 0
+local analogNumber = 0
+local sampleNumber = 0
+
+-- 3rd Wave-reported channel (source of truth when available)
+local midiChannel = nil
+
+-- bound to PART_SELECT param
+function onPartSelectChanged(valueObject, value)
+  if midiChannel == nil then return end
+  device:setChannel(midiChannel)
+  channel = device:getChannel()
+  deviceId = device:getId()
+  port = device:getPort()
+end
+
+-- to store 100 patch names in 5 banks
+local nameBank = {}   
+-- 1 = bank A, 2= bank B, 3 = bank C, 4 = bank D, 5 = bank E 
+for y = 1,5 do        
+    nameBank[y] = {}
+    -- patch numbers 1..100
+    for z = 1,100 do  
+        nameBank[y][z] = ""
+    end
+end
+
+-- Helper: concatenate two arrays. Used for SysEx message construction
+local function concat(t1, t2)
+  local t = {}
+  for i=1,#t1 do t[#t+1] = t1[i] end
+  for i=1,#t2 do t[#t+1] = t2[i] end
+  return t
+end
+
+------------- Persistence helpers for patch-name cache ----------
+-- Electra One runtime in this preset:
+--   persist(table)
+--   recall(table)
+-- Persist a tagged flat map and rebuild nameBank on load.
+
+local function makePatchKey(bank, patch)
+  return string.format("b%d_p%03d", bank, patch) -- bank 0..4, patch 0..99
+end
+
+local function flattenNameBank(src)
+  local flat = {}
+  local count = 0
+  for b = 1, 5 do
+    for p = 1, 100 do
+      local v = src[b] and src[b][p] or ""
+      v = tostring(v or "")
+      flat[makePatchKey(b, p)] = v
+      if v ~= "" then count = count + 1 end
+    end
+  end
+  return flat, count
+end
+
+local function inflateNameBank(flat)
+  local dst = {}
+  local count = 0
+  for b = 1, 5 do
+    dst[b] = {}
+    for p = 1, 100 do
+      local v = (flat and flat[makePatchKey(b, p)]) or ""
+      dst[b][p] = v
+      if v ~= "" then count = count + 1 end
+    end
+  end
+  return dst, count
+end
+
+local function saveNameBank()
+  local flat, count = flattenNameBank(nameBank)
+  local payload = {
+    _tag = PERSIST_TAG,
+    names = flat
+  }
+  local ok, err = pcall(persist, payload)
+  if ok then
+    print(string.format("nameBank persisted (%d non-empty names)", count))
+  else
+    print("nameBank persist failed: " .. tostring(err))
+  end
+end
+
+local function loadNameBank()
+  local payload = {}
+  local ok, err = pcall(recall, payload) -- recall(destinationTable)
+  if not ok then
+    print("nameBank recall failed: " .. tostring(err))
+    return
+  end
+  if payload._tag ~= PERSIST_TAG then
+    print("nameBank recall: no matching persisted payload tag")
+    return
+  end
+  if type(payload.names) ~= "table" then
+    print("nameBank recall: payload.names missing/invalid")
+    return
+  end
+  local rebuilt, count = inflateNameBank(payload.names)
+  nameBank = rebuilt
+  print(string.format("nameBank restored (%d non-empty names)", count))
+end
+
+-- Debounced/controlled persistence during large scans
+local nameBankDirty = false
+local nameBankUpdates = 0
+local SAVE_EVERY_N_UPDATES = 50 -- tune if desired
+
+local function markNameBankDirty()
+  nameBankDirty = true
+  nameBankUpdates = nameBankUpdates + 1
+  -- periodic checkpoint save during long scans
+  if (nameBankUpdates % SAVE_EVERY_N_UPDATES) == 0 then
+    saveNameBank()
+    nameBankDirty = false
+  end
+end
+
+local function flushNameBankIfDirty()
+  if nameBankDirty then
+    saveNameBank()
+    nameBankDirty = false
+  end
+end
+
+-- called when preset first loads
+function preset.onLoad()
+  loadNameBank()  -- restore cached patch names first
+  pages.display(1)
+  refreshUnisonVisibility()
+end
+
+-- called after loading 
+function preset.onReady()
+  getWaveCount(nil,1) -- number of wave tables
+end
+
+----------UI formatter functions -----------------
+-- format part pan
+function pan(valueObject,value)
+  local control = valueObject:getControl():getId()
+  local side =" L"
+  if (value < 0 ) then 
+    controls.get(control):setColor (BLUE)
+  elseif (value == 0) then
+    side = " Center"
+    controls.get(control):setColor (ORANGE)
+  elseif (value > 0) then
+    side = " R"
+    controls.get(control):setColor (RED)
+  end
+  return(value)
+end
+ 
+function percent (valueObject, value)
+    return (string.format ("%.1f%%", value/1.27))
+end
+
+function zeroOne (valueObject, value)
+    return (string.format ("%.2f", value/127))
+end
+
+function gain (valueObject, value)
+    return (string.format ("%.0f", (value/1.27)))
+end
+
+function displayBpm(valueObject,value)
+   return(math.floor(value) .. " bpm")
+end
+
+-- FX2 param 2 when type = shimmer reverb (-12 .. + 12)
+function fx2Param2(valueObject,value)
+  local fx2Num = parameterMap.get(deviceId, PT_VIRTUAL, FX2_TYPE)
+  if fx2Num == 13 then -- shimmer reverb
+    local control = valueObject:getControl():getId()
+    local x = (24*value/255 - 12)
+    if (x < 0 ) then 
+      controls.get(control):setColor (BLUE)
+    elseif (x == 0) then
+      controls.get(control):setColor (WHITE)
+    elseif (x > 0) then
+      controls.get(control):setColor (RED)
+    end
+    return (string.format ("%.1f", x))
+  else
+    return math.floor(value)
+  end
+end
+
+----------------- create virtual control for wavetable control so control has no dead spots wher ethere aren't wavetables ----------------
+local wtSyncing = false
+
+local function findIndex(t, v)
+  for i = 1, #t do if t[i] == v then return i end end
+  return nil
+end
+
+-- Build UI starts automatically
+local function buildUiStarts(segments)
+  local ui = 0
+  for _,seg in ipairs(segments) do
+    seg.uiStart = ui
+    seg.uiEnd   = ui + seg.count - 1
+    ui = ui + seg.count
+  end
+  return ui - 1 -- max UI value
+end
+
+local WT_UI_MAX = buildUiStarts(WT_SEGMENTS)
+
+local function uiToSynth(ui)
+  local u = math.floor((ui or 0) + 0.5)
+  if u < 0 then u = 0 end
+  if u > WT_UI_MAX then u = WT_UI_MAX end
+
+  for _,seg in ipairs(WT_SEGMENTS) do
+    if u >= seg.uiStart and u <= seg.uiEnd then
+      return seg.synthStart + (u - seg.uiStart), seg.tag
+    end
+  end
+  return 0, "P"
+end
+
+local function synthToUi(sv)
+  local s = math.floor((sv or 0) + 0.5)
+
+  for i,seg in ipairs(WT_SEGMENTS) do
+    local s0, s1 = seg.synthStart, seg.synthStart + seg.count - 1
+    if s >= s0 and s <= s1 then
+      return seg.uiStart + (s - s0), seg.tag
+    end
+
+    -- dead zone clamps to previous segment end
+    local nextSeg = WT_SEGMENTS[i+1]
+    if nextSeg and s > s1 and s < nextSeg.synthStart then
+      return seg.uiEnd, seg.tag
+    end
+  end
+
+  if s < WT_SEGMENTS[1].synthStart then return WT_SEGMENTS[1].uiStart, WT_SEGMENTS[1].tag end
+  local last = WT_SEGMENTS[#WT_SEGMENTS]
+  return last.uiEnd, last.tag
+end
+
+-- update names of wavetable controls
+function waveTableName(valueObject, value)
+  local control = valueObject:getControl():getId()
+  local u = math.floor((value or 0) + 0.5)
+  local s,tag = uiToSynth(u) -- map UI -> synth domain first
+  local name = "Wavetable P00"
+  if s >= 0 and s <= 35 then
+    name = WAVETABLE[s] or "Wavetable P00"
+  elseif s >= 128 and s <= 183 then
+    name = WAVETABLE[s] or "U00"
+  elseif s >= 256 and s <= 262 then
+    name = WAVETABLE[s] or "A00"
+  elseif s == 384 then
+    name = "WM"
+  elseif s >= 512 and s <= 522 then
+    name = WAVETABLE[s] or "S00"
+  end
+  controls.get(control):setName(name)
+end
+-- update values of UI wavetable controls
+function waveTableFormat(valueObject, value)
+  local u = math.floor((value or 0) + 0.5)
+  local s,tag = uiToSynth(u) -- map UI -> synth domain first
+  if s >= 0 and s <= 35 then
+    return string.format("P%02d", s)
+  elseif s >= 128 and s <= 183 then
+    return string.format("U%02d", s - 128)
+  elseif s >= 256 and s <= 262 then
+    return string.format("A%02d", s - 256)
+  elseif s == 384 then
+    return "W"
+  elseif s >= 512 and s <= 522 then
+    return string.format("S%02d", s - 512)
+  end
+  return ""
+end
+
+-- update names of mod matrix destination controls
+function destination(valueObject,value)
+  local control = valueObject:getControl():getId()
+    controls.get(control):setName (DESTINATION[value])
+end
+
+-- update names of mod matrix source controls
+function source(valueObject,value)
+  local control = valueObject:getControl():getId()
+    controls.get(control):setName (SOURCE[value])
+end
+
+-- control visibility of part 1/2 unison params
+local function setGroupVisible(ids, visible, color, slotMap)
+  for _, id in ipairs(ids) do
+    if color then controls.get(id):setColor(color) end
+    if visible and slotMap and slotMap[id] then
+      controls.get(id):setSlot(slotMap[id], CTRL_PAGE)
+    end
+    controls.get(id):setVisible(visible)
+  end
+end
+
+function refreshUnisonVisibility()
+  local part = parameterMap.get(deviceId, PT_VIRTUAL, PART_SELECT) or 1
+  local p1On = (parameterMap.get(deviceId, PT_VIRTUAL, UNISON1_PARAM) or 0) == 1
+  local p2On = (parameterMap.get(deviceId, PT_VIRTUAL, UNISON2_PARAM) or 0) == 1
+  controls.get(UNISON1_CTRL):setVisible(part == 1)
+  controls.get(UNISON2_CTRL):setVisible(part == 2)
+  setGroupVisible(CTRL_UNISON1, false, BLUE,  nil)
+  setGroupVisible(CTRL_UNISON2, false, GREEN, nil)
+  if part == 1 and p1On then
+    setGroupVisible(CTRL_UNISON1, true, BLUE, SLOT_UNISON1)
+  elseif part == 2 and p2On then
+    setGroupVisible(CTRL_UNISON2, true, GREEN, SLOT_UNISON2)
+  end
+end
+
+-- control visibility of note sync params
+local function showControlWhenOn(ctrlId, value)
+  local c = controls.get(ctrlId)
+  if c then
+    c:setVisible(value == 1)
+  end
+end
+
+function showSyncRate1(_, value)  showControlWhenOn(CTRL_LFO1_SYNC, value) end
+function showSyncRate2(_, value)  showControlWhenOn(CTRL_LFO2_SYNC, value) end
+function showSyncRate3(_, value)  showControlWhenOn(CTRL_LFO3_SYNC, value) end
+function showSyncRate4(_, value)  showControlWhenOn(CTRL_LFO4_SYNC, value) end
+function showSyncRateFx1(_, value) showControlWhenOn(CTRL_FX1_SYNC, value) end
+function showSyncRateFx2(_, value) showControlWhenOn(CTRL_FX2_SYNC, value) end
+
+----------------------------------------------------------------
+-- FX SPEC TABLES
+----------------------------------------------------------------
+
+local function updateFxParamNames(spec, fxType, ctrlIds, fallbackPrefix)
+  local fx = spec and spec[fxType]
+  for i, ctrlId in ipairs(ctrlIds) do
+    local label = (fx and fx.params and fx.params[i] and fx.params[i].label)
+               or (fallbackPrefix .. " " .. tostring(i))
+    controls.get(ctrlId):setName(label)
+  end
+end
+
+local function refreshFxParamNames()
+  local fx1Type = parameterMap.get(deviceId, PT_VIRTUAL, FX1_TYPE) or 0
+  local fx2Type = parameterMap.get(deviceId, PT_VIRTUAL, FX2_TYPE) or 0
+  updateFxParamNames(FX1_SPEC, fx1Type, CTRL_FX1_NAME_IDS, "Param")
+  updateFxParamNames(FX2_SPEC, fx2Type, CTRL_FX2_NAME_IDS, "Param")
+end
+
+function showFx1Param(valueObject, value)
+  local vis = FX1_VIS[value]
+  if not vis then
+    vis = {true,true,true,false, false,false,false}
+  end
+  for i, id in ipairs(CTRL_FX1_IDS) do
+    controls.get(id):setVisible(vis[i])
+  end
+end
+
+function showFx2Param(valueObject, value)
+  local vis = FX2_VIS[value]
+  if not vis then
+    vis = {true,true,true,false,false,false,false,false, false,false,false,false}
+  end
+  for i, id in ipairs(CTRL_FX2_IDS) do
+    controls.get(id):setVisible(vis[i])
+  end
+end
+
+-------------------------------------------------------------------------------
+function displayPatchName (valueObject, value)
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER) + 1
+  local patchName = nameBank[bankNum][value+1]
+  local c = controls.get(CTRL_PROG_NUMBER); if c ~= nil then c:setName(patchName) end
+  return (bankTxt[bankNum].."-"..string.format("P%03d",value+1))
+end
+
+-- ── ADSR value-in-name suffix ───────────────────────────────────────────────
+-- Appends the live value of an ADSR envelope's primary stage to its tile
+-- title, e.g. "AMP ATTACK" -> "AMP ATTACK 101". The base (unsuffixed) name is
+-- captured the first time each control is seen so repeat updates don't keep
+-- stacking suffixes onto an already-modified name.
+
+local adsrBaseNames = {}
+
+function adsrValueName(valueObject, value)
+  local ctrl = valueObject:getControl()
+  --if not ctrl then return end
+  local id = ctrl:getId()
+  if not adsrBaseNames[id] then adsrBaseNames[id] = ctrl:getName() end
+  ctrl:setName(adsrBaseNames[id] .. " " .. string.format("%d", value))
+  -- print ("ctl = "..id..", base Name = "..ahdsrBaseNames[id])
+end
+
+-------------------- Wave Envelope Loop Constraint Validation --------------------
+-- Ensure Start < End for the same envelope target
+-- Called when either Start or End control changes
+
+local function getLoopEnvelopeTarget()
+  -- Returns the currently selected envelope target (1-3, maps to 0-2 offset)
+  return (parameterMap.get(deviceId, PT_VIRTUAL, UI_ENV_TARGET) or 1) - 1
+end
+
+function onLoopStartChanged(valueObject, value)
+  local envIndex = getLoopEnvelopeTarget() + 1
+  local endValue = parameterMap.get(deviceId, PT_VIRTUAL, LOOP_END_NRPN_BASE[envIndex]) or 6
+  if value >= endValue then
+    value = math.max(1, endValue - 1)
+    parameterMap.set(deviceId, PT_VIRTUAL, LOOP_START_NRPN_BASE[envIndex], value)
+  end
+  return (string.format ("%.0f", value))
+end
+
+function onLoopEndChanged(valueObject, value)
+  local envIndex = getLoopEnvelopeTarget() + 1
+  local startValue = parameterMap.get(deviceId, PT_VIRTUAL, LOOP_START_NRPN_BASE[envIndex]) or 1
+  if value <= startValue then
+    value = math.min(6, startValue + 1)
+    parameterMap.set(deviceId, PT_VIRTUAL, LOOP_END_NRPN_BASE[envIndex], value)
+  end
+  return (string.format ("%.0f", value))
+end
+
+------------------------------------------------------------------
+--                  midi request functions                  --
+------------------------------------------------------------------
+-- request data for program number p from bank b
+function getPatchData(b,p)
+--  local message = concat(SYSEX_HEADER,{0x05,b,p})  -- including sequencer data
+  local message = concat(SYSEX_HEADER,{0x08,b,p}) -- excluding sequencer data 
+  midi.sendSysex(port,message)
+end
+
+-- request a patch name
+function getPatchName(valueObject,value)
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER)
+  local progNum = parameterMap.get (deviceId, PT_VIRTUAL, PROG_NUMBER)
+  local message = concat(SYSEX_HEADER,{0x10,bankNum,progNum})
+  midi.sendSysex(port,message)
+end
+
+-- request the data in the edit buffer
+function getBufferData(valueObject,value)
+  local message = concat(SYSEX_HEADER,{0x06})
+  midi.sendSysex(port,message)
+end
+
+-- request wavetable count by type
+function getWaveCount(valueObject,value)
+  local message = concat(SYSEX_HEADER,{0x07})
+  midi.sendSysex(port,message)
+end
+
+------- send bank/program number changes and request sysEx of loaded patch 
+function selectIt(valueObject, value)
+  if value==0 then return end
+  local message = valueObject:getMessage ()
+  local parameterNumber = message:getParameterNumber ()
+  local messageValue = message:getValue ()
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, parameterNumber-messageValue -1)
+  local progNum = parameterMap.get (deviceId, PT_VIRTUAL, parameterNumber-messageValue ) + messageValue - 2
+  if progNum == 100 then progNum= 0 end
+  if progNum == -1   then progNum=99  end
+  parameterMap.set (deviceId, PT_VIRTUAL, parameterNumber-messageValue,progNum)
+  midi.sendControlChange(port , channel , 32, bankNum)
+  midi.sendProgramChange(port , channel , progNum)
+  -- request patch 
+  getPatchData(bankNum,progNum)
+end
+
+------- Timer-based program name scanning all patches in all banks and persist the names -------------
+
+-- State tracking for the patch scanner
+local patchScanState = {
+  bank = 0,           -- current bank (0-4)
+  patch = 0,          -- current program (0-99)
+  isRunning = false   -- scanner active flag
+}
+
+-- Start the patch scanner (sends 5 requests per second)
+function startPatchScanner(valueObject,value)
+  if value == 0 then return end
+  if patchScanState.isRunning then
+    print("Program scanner already running")
+    return
+  end
+  patchScanState.isRunning = true
+  patchScanState.bank = 0
+  patchScanState.patch = 0
+  print("Starting program scanner: 5 banks × 100 patches")
+  timer.enable()
+end
+
+-- function to stop the patch scanner
+local function stopPatchScanner()
+  timer.disable()
+  patchScanState.isRunning = false
+  flushNameBankIfDirty()   -- final save at end of scan
+  print("Program scanner stopped")
+end
+
+local SCAN_HEADER = concat(SYSEX_HEADER,{0x10})
+
+-- Timer callback (called by Electra One runtime)
+function timer.onTick()
+  if not patchScanState.isRunning then return end
+  -- Send the sysex request for current bank/patch
+  local msg = concat(SCAN_HEADER, {patchScanState.bank, patchScanState.patch})
+  midi.sendSysex(port, msg)
+  print(string.format("Requesting Bank %d, Program %03d", patchScanState.bank, patchScanState.patch))
+  -- Advance to next patch
+  patchScanState.patch = patchScanState.patch + 1
+  -- Check if we've reached the end of this bank
+  if patchScanState.patch >= 100 then
+    patchScanState.patch = 0
+    patchScanState.bank = patchScanState.bank + 1
+    -- Check if we've completed all 4 banks
+    if patchScanState.bank > 4 then
+      patchScanState.bank = 0
+      print("Program scanner cycle complete")
+      stopPatchScanner()
+      parameterMap.set(deviceId, PT_VIRTUAL, 10024, 0)
+    end
+  end
+end
+
+-------- send midi nrpn message to 3rd Wave -------------             
+function sendNRPN(ch, nrpn, value)
+  midi.sendControlChange (port , ch , 99, math.floor(nrpn/128))
+  midi.sendControlChange (port , ch , 98, nrpn%128)
+  midi.sendControlChange (port , ch , 6, math.floor(value/128))
+  midi.sendControlChange (port , ch , 38, value%128)
+end
+
+--------------------------------------------------------------------------------
+-- 3rd Wave Patch State Model
+--
+-- Compare model:
+--   COMPARE_IT = 0 -> EDIT state (user-tweaked, mutable)
+--   COMPARE_IT = 1 -> LOADED state (snapshot from last patch dump)
+--
+-- View model:
+--   UI always shows: Single cache + currently selected Part cache
+--   PART_SELECT = 1 -> Part 1 overlay
+--   PART_SELECT = 2 -> Part 2 overlay
+--
+-- MIDI output:
+--   parameterMap.onChange sends NRPN for voice params (<1024)
+--   while repainting from cache, outgoing MIDI is suppressed via isApplyingCache
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+-- Utility / state helpers
+--------------------------------------------------------------------------------
+
+local function copyCache(src)
+  local dst = {}
+  for k, v in pairs(src) do
+    dst[k] = v
+  end
+  return dst
+end
+
+local function getPartSel()
+  return parameterMap.get(deviceId, PT_VIRTUAL, PART_SELECT) or 1
+end
+
+local function getCompareMode()
+  return (parameterMap.get(deviceId, PT_VIRTUAL, COMPARE_IT) or 0) == 1
+end
+
+local function isVoiceParam(pNum)
+  return pNum < 1024
+end
+
+--------------------------------------------------------------------------------
+-- SysEx decode helpers
+--------------------------------------------------------------------------------
+
+local function extractPatchName(sysexBlock)
+  local chars = {}
+  for i = 9, 136, 4 do
+    local vLsb = sysexBlock:peek(i + 3) or 0
+    if vLsb == 0 then break end
+    chars[#chars + 1] = string.char(vLsb)
+  end
+  return table.concat(chars):gsub("%s+$", "")
+end
+
+local function decodeNrpnBlockToCache(sysexBlock, startByte, endByte, cache)
+  local tupleCount = math.floor((endByte - startByte + 1) / 4)
+  for t = 0, tupleCount - 1 do
+    local i = startByte + t * 4
+    local pMsb = sysexBlock:peek(i) or 0
+    local pLsb = sysexBlock:peek(i + 1) or 0
+    local vMsb = sysexBlock:peek(i + 2) or 0
+    local vLsb = sysexBlock:peek(i + 3) or 0
+
+    local parNum = pMsb * 128 + pLsb
+    local value  = vMsb * 128 + vLsb
+    cache[parNum] = value
+  end
+end
+
+--------------------------------------------------------------------------------
+-- Cache -> UI repaint helpers (no MIDI out)
+--------------------------------------------------------------------------------
+
+local function applyCacheToParams(cache, targetParType)
+  targetParType = targetParType or PT_VIRTUAL
+  for parNum, value in pairs(cache) do
+    parameterMap.set(deviceId, targetParType, parNum, value)
+  end
+end
+
+local function repaintFromVisibleCaches()
+  if isApplyingCache then return end
+  isApplyingCache = true
+
+  local ok, err = pcall(function()
+    local partSel = getPartSel()
+    local isCompareMode = getCompareMode()
+
+    local singleCache = isCompareMode and singleBase or singleEdit
+    local partCache = (partSel == 2)
+      and (isCompareMode and part2Base or part2Edit)
+      or  (isCompareMode and part1Base or part1Edit)
+
+    applyCacheToParams(singleCache, PT_VIRTUAL)
+    applyCacheToParams(partCache, PT_VIRTUAL)
+  end)
+
+  isApplyingCache = false
+  if not ok then print("repaintFromVisibleCaches failed: " .. tostring(err)) end
+end
+
+local function syncWtUiFromSynthParams()
+  wtSyncing = true
+  for i = 1, #WT_SYNTH_PARAMS do
+    local s = parameterMap.get(deviceId, PT_VIRTUAL, WT_SYNTH_PARAMS[i]) or 0
+    parameterMap.set(deviceId, PT_VIRTUAL, WT_UI_PARAMS[i], synthToUi(s))
+  end
+  wtSyncing = false
+end
+
+local function setControlParameterNumber(ctrlId, parameterNumber)
+  local ctrl = controls.get(ctrlId)
+  if not ctrl then return end
+  local value = ctrl:getValue("value")
+  if not value then return end
+  local message = value:getMessage()
+  if not message then return end
+  message:setParameterNumber(parameterNumber)
+end
+
+function refreshLoopControlBindings()
+  local envIndex = getLoopEnvelopeTarget() + 1
+  setControlParameterNumber(LOOP_STATE_CTRL, LOOP_STATE_NRPN_BASE[envIndex])
+  setControlParameterNumber(LOOP_START_CTRL, LOOP_START_NRPN_BASE[envIndex])
+  setControlParameterNumber(LOOP_END_CTRL, LOOP_END_NRPN_BASE[envIndex])
+  repaintFromVisibleCaches()
+end
+
+--------------------------------------------------------------------------------
+-- NRPN send helpers
+--------------------------------------------------------------------------------
+
+local function toSynthParNumForPart(parNum, partSel)
+  if partSel == 2 then
+    if parNum == 397 or parNum == 401 or parNum == 405 or parNum == 409 or parNum == 429 or parNum == 435 then
+      parNum = parNum + 1
+    end
+    return parNum + 1000
+  end
+  return parNum
+end
+
+local function resolvePartChannel(partSel)
+  if partSel == 2 then
+    local d = devices.get(3)
+    return (d and d:getChannel()) or wavePart2Ch or part2Channel or channel or 1
+  else
+    local d = devices.get(2)
+    return (d and d:getChannel()) or wavePart1Ch or part1Channel or channel or 1
+  end
+end
+
+local function sendCacheToSynth(cache, partSel)
+  local ch = resolvePartChannel(partSel)
+  for parNum, value in pairs(cache) do
+    local outPar = toSynthParNumForPart(parNum, partSel)
+    sendNRPN(ch, outPar, value)
+  end
+end
+
+local function resendVisibleToSynth()
+  local partSel = getPartSel()
+  local isCompareMode = getCompareMode()
+
+  if isCompareMode then
+    sendCacheToSynth(singleBase, 1)
+    if partSel == 2 then
+      sendCacheToSynth(part2Base, 2)
+    else
+      sendCacheToSynth(part1Base, 1)
+    end
+  else
+    sendCacheToSynth(singleEdit, 1)
+    if partSel == 2 then
+      sendCacheToSynth(part2Edit, 2)
+    else
+      sendCacheToSynth(part1Edit, 1)
+    end
+  end
+
+  print(string.format(
+    "Resend to synth: %s mode, Part %d",
+    isCompareMode and "COMPARE (Base)" or "EDIT",
+    partSel
+  ))
+end
+
+--------------------------------------------------------------------------------
+-- Name cleanup helper
+--------------------------------------------------------------------------------
+local function cleanPatchName(s)
+  s = s:gsub("%z", "")
+  s = s:gsub("%s+$", "")
+  return s
+end
+
+--------------------------------------------------------------------------------
+-- sysEx data received
+--------------------------------------------------------------------------------
+
+function midi.onSysex(midiInput, sysexBlock)
+  local function is3rdWave()
+    return sysexBlock:peek(1) == 0xF0 and sysexBlock:peek(2) == 0x00
+       and sysexBlock:peek(3) == 0x02 and sysexBlock:peek(4) == 0x4A
+       and sysexBlock:peek(5) == MODEL_BYTE
+  end
+  if not is3rdWave() then return end
+
+  local cmd = sysexBlock:peek(6)
+  local len = sysexBlock:getLength()
+  print("3rd Wave sysex message received on interface= " .. midiInput.interface..", cmd=0x"..string.format("%02X",cmd).." len="..len)
+
+  -- cmd 0x02 patch dump byte map:
+  -- 9..136     patch name tuples (32)
+  -- 137..672   single block A
+  -- 673..1772  part 1 block
+  -- 1773..1788 single block B
+  -- 1789..2888 part 2 block
+  if cmd == 0x02 then
+    -- if first param number MSB,LSB = 0 then nrpn param 0 has been received. Code not expecting that
+    if sysexBlock:peek(9) == 0 and sysexBlock:peek(10) == 0 then print("nrpn 0 was received. Aborting.") return end 
+
+    local bankNum = sysexBlock:peek(7)
+    local progNum = sysexBlock:peek(8)
+    print( "Patch data for bank ".. math.floor(bankNum)..", program " ..math.floor(progNum).." received" )
+
+    local patchName = extractPatchName(sysexBlock)
+    if patchName ~= "" then
+      info.setText(string.sub(patchName, 1, 20))
+    end
+    -- ensure part is set back to 1 when a new patch is parsed
+    parameterMap.set(deviceId, PT_VIRTUAL, PART_SELECT, 1)
+
+    -- Rebuild loaded snapshot
+    singleBase, part1Base, part2Base = {}, {}, {}
+    decodeNrpnBlockToCache(sysexBlock, 137, 672, singleBase)
+    decodeNrpnBlockToCache(sysexBlock, 1773, 1788, singleBase)
+    decodeNrpnBlockToCache(sysexBlock, 673, 1772, part1Base)
+    decodeNrpnBlockToCache(sysexBlock, 1789, 2888, part2Base)
+
+    -- Reset edit state from loaded snapshot
+    singleEdit = copyCache(singleBase)
+    part1Edit  = copyCache(part1Base)
+    part2Edit  = copyCache(part2Base)
+
+    repaintFromVisibleCaches()
+    syncWtUiFromSynthParams()
+    refreshFxParamNames()
+    refreshUnisonVisibility()
+    refreshLoopControlBindings()
+    syncWaveEnvFromVisibleCaches()
+
+  elseif cmd == 0x11 then
+    local bankNum = sysexBlock:peek(7)+1
+    local progNum = sysexBlock:peek(8)+1
+    local rawName = ""
+    for i = 9, len-1 do
+      rawName = rawName .. string.char(sysexBlock:peek(i))
+    end
+    print( "Name of bank ".. math.floor(bankNum).."  program " ..math.floor(progNum).." received: " .. rawName )
+    nameBank[bankNum][progNum] = cleanPatchName(rawName)
+    markNameBankDirty()
+
+  elseif cmd == 0x04 and len == 11 then
+    ppgNumber = sysexBlock:peek(7)
+    userNumber = sysexBlock:peek(8)
+    analogNumber = sysexBlock:peek(9)
+    sampleNumber = sysexBlock:peek(10)
+    print( "There are "..math.floor(ppgNumber).." PPG, "..math.floor(userNumber).." User, "..math.floor(analogNumber)..
+          " Analog, and "..math.floor(sampleNumber).." Sample wavetables loaded" )
+  end
+end
+
+--------------------------------------------------------------------------------
+-- Program change message recieved (Synth -> UI)
+--------------------------------------------------------------------------------
+-- External program change on synth: mirror program index.
+-- Only updates virtual program-number parameter value. 
+-- Does not call a program sysEx dump - use select buttons
+function midi.onProgramChange(midiInput, channel, progNum)
+  parameterMap.set(deviceId, PT_VIRTUAL, PROG_NUMBER, progNum)
+  local bankNum = parameterMap.get (deviceId, PT_VIRTUAL, BANK_NUMBER)
+end
+
+--------------------------------------------------------------------------------
+-- Bank MSB CC message recieved (Synth -> UI)
+--------------------------------------------------------------------------------
+-- only updates bankNum virtual parameter value 
+function midi.onControlChange(midiInput, ch, controllerNumber, value)
+  if controllerNumber == 32 then
+    parameterMap.set(deviceId, PT_VIRTUAL, BANK_NUMBER, value)
+  end
+end
+
+--------------------- Wave Envelope Editor ------------------------
+
+-- ---------- Runtime state ----------
+activePt = 1
+
+-- target synth envelope 1..3
+local targetEnv = 1
+local envOffset = 0 -- targetEnv - 1
+
+local waveEnv = {}
+waveEnv[0] = {TIME_MIN, LEVEL_MIN, STD_COLOR}
+waveEnv[WAVEPTS+1] = {TIME_MAX, LEVEL_MAX, STD_COLOR}
+
+local defaultP = {48, 1, 48, 1, 48, 1}
+for i=1,WAVEPTS do
+   waveEnv[i] = {TIME_MAX, defaultP[i] or 0, STD_COLOR}
+end
+waveEnv[activePt][CLR] = ACT_COLOR
+
+local g = graphics
+local xyPadControl = controls.get(XY_PAD_CTRL)
+xyPadControl.x = 0
+xyPadControl.y = 0
+
+local function clamp(v, lo, hi)
+   return math.max(lo, math.min(hi, v))
+end
+
+local function updateActiveWaveEnvEditCache(parNum, value)
+   if isApplyingCache or getCompareMode() then return end
+
+   local partSel = getPartSel()
+   if partSel == 2 then
+      part2Edit[parNum] = value
+   else
+      part1Edit[parNum] = value
+   end
+end
+
+local function txStageTime(stage, value)
+   local baseNrpn = WENV_TIME_NRPN_BASE[stage]
+   if baseNrpn == nil then return end
+
+   local v = clamp(value, TIME_MIN, TIME_MAX)
+   local nrpn = baseNrpn + envOffset
+   local partSel = getPartSel()
+   local outNrpn = toSynthParNumForPart(nrpn, partSel)
+   local ch = resolvePartChannel(partSel)
+
+   updateActiveWaveEnvEditCache(nrpn, v)
+   sendNRPN(ch, outNrpn, v)
+   dprint(string.format("NRPN TX part=%d env=%d stage=%d TIME nrpn=%d val=%d", partSel, targetEnv, stage, outNrpn, v))
+end
+
+local function txStageLevel(stage, value)
+   local baseNrpn = WENV_LEVEL_NRPN_BASE[stage]
+   if baseNrpn == nil then return end
+
+   local v = clamp(value, LEVEL_MIN, LEVEL_MAX)
+   local nrpn = baseNrpn + envOffset
+   local partSel = getPartSel()
+   local outNrpn = toSynthParNumForPart(nrpn, partSel)
+   local ch = resolvePartChannel(partSel)
+
+   updateActiveWaveEnvEditCache(nrpn, v)
+   sendNRPN(ch, outNrpn, v)
+   dprint(string.format("NRPN TX part=%d env=%d stage=%d LEVEL nrpn=%d val=%d", partSel, targetEnv, stage, outNrpn, v))
+end
+
+local function txLoopState(isOn)
+   local nrpn = LOOP_STATE_NRPN_BASE[envOffset + 1]
+   local v = isOn and 1 or 0
+   sendNRPN(channel, nrpn, v)
+   dprint(string.format("NRPN TX env=%d LOOP_STATE nrpn=%d val=%d", targetEnv, nrpn, v))
+end
+
+local function txLoopStart(v)
+   local nrpn = LOOP_START_NRPN_BASE[envOffset + 1]
+   local val = clamp(v, 1, WAVEPTS)
+   sendNRPN(channel, nrpn, val)
+   dprint(string.format("NRPN TX env=%d LOOP_START nrpn=%d val=%d", targetEnv, nrpn, val))
+end
+
+local function txLoopEnd(v)
+   local nrpn = LOOP_END_NRPN_BASE[envOffset + 1]
+   local val = clamp(v, 1, WAVEPTS)
+   sendNRPN(channel, nrpn, val)
+   dprint(string.format("NRPN TX env=%d LOOP_END nrpn=%d val=%d", targetEnv, nrpn, val))
+end
+
+function printValues()
+   local fs = 10           -- font size (was 10)
+   local dx = 110           -- horizontal spacing (was 110)
+
+   for i=1,NUMPTS do
+      g.setColor(waveEnv[i][CLR])
+      g.print(i*dx,  0, string.format("T%d: %d ", i, waveEnv[i][AX]), fs, LEFT)
+      g.print(i*dx, 18, string.format("P%d: %d ", i, waveEnv[i][AY]), fs, LEFT)
+   end
+
+   g.setColor(STD_COLOR)
+   g.print(5, 42, string.format("Target Env: %d", targetEnv), 11, LEFT)
+end
+
+function paintXyPad(control, value)
+
+  local bounds = control:getBounds()
+  g.setColor(0x0000)
+  g.fillRect(0, 0, bounds[WIDTH], bounds[HEIGHT])
+
+  g.setColor(STD_COLOR)
+  g.drawRect(0, WIN_OFST, bounds[WIDTH], bounds[HEIGHT]-WIN_OFST)
+
+  local xPos = 0
+  local yPos = XY_PAD_HEIGHT
+  for i=1,NUMPTS do
+    local xScale = math.floor(waveEnv[i][AX] * SCALEX)
+    local yScale = clamp(waveEnv[i][AY] + WENV_Y_DRAW_NUDGE, LEVEL_MIN, LEVEL_MAX) * SCALEY
+    local ym1Scale = clamp(((i > 1) and waveEnv[i-1][AY] or waveEnv[0][AY]) + WENV_Y_DRAW_NUDGE, LEVEL_MIN, LEVEL_MAX) * SCALEY
+    g.setColor(waveEnv[i][CLR])
+    g.fillCircle(xPos + xScale, yPos - yScale, 10)
+
+    g.setColor(STD_COLOR)
+    g.drawLine(xPos, yPos - ym1Scale, xPos + xScale, yPos - yScale)
+
+    xPos = xPos + xScale
+
+  end
+
+  printValues()
+end
+
+function touchCallback(control, touchEvent)
+  local endPt = NUMPTS + 1
+  local tolerance = 25
+
+  if touchEvent.type == MOVE then
+    if (touchEvent.y < WIN_OFST) then return end
+
+    local preX = 0
+    for i=1,activePt-1 do preX = preX + waveEnv[i][AX] end
+
+      local postX = preX + waveEnv[activePt][AX]
+      if (activePt ~= endPt) then postX = postX + waveEnv[activePt+1][AX] end
+
+      if (activePt ~= endPt) and (touchEvent.x >= preX) and (touchEvent.x <= postX) then
+         control.x = touchEvent.x
+         control.y = touchEvent.y
+
+         local t = clamp(math.floor((control.x - preX) / SCALEX), TIME_MIN, TIME_MAX)
+         local l = clamp(math.floor((XY_PAD_HEIGHT - control.y) / SCALEY) - WENV_Y_DRAW_NUDGE, LEVEL_MIN, LEVEL_MAX)
+         waveEnv[activePt][AX] = t
+         waveEnv[activePt][AY] = l
+
+         parameterMap.set(1, PT_VIRTUAL, UI_TIME_EDIT, t)
+         parameterMap.set(1, PT_VIRTUAL, UI_LEVEL_EDIT, l)
+      end
+
+  elseif touchEvent.type == DOWN then
+    local i = 1
+    local xPos = 0
+    local yPos = XY_PAD_HEIGHT
+
+    if (touchEvent.y >= WIN_OFST) then
+      local minDist = math.huge
+      local closestPt = endPt
+
+      while (i < endPt) do
+        local xScale = math.floor(waveEnv[i][AX] * SCALEX)
+        local yScale = clamp(waveEnv[i][AY] + WENV_Y_DRAW_NUDGE, LEVEL_MIN, LEVEL_MAX) * SCALEY
+        local dist = math.sqrt((touchEvent.x - (xPos + xScale))^2 + (touchEvent.y - (yPos - yScale))^2)
+        if dist < minDist then
+          minDist = dist
+          closestPt = i
+        end
+
+        xPos = xPos + xScale
+        i = i + 1
+      end
+
+      if minDist <= tolerance then i = closestPt else i = endPt end
+    else
+      i = endPt
+    end
+
+    if (activePt ~= endPt) then waveEnv[activePt][CLR] = STD_COLOR end
+    if (i ~= endPt) then waveEnv[i][CLR] = ACT_COLOR end
+
+    activePt = i
+    parameterMap.set(1, PT_VIRTUAL, UI_STAGE_SELECT, math.min(activePt, endPt))
+  end
+
+  control:repaint()
+end
+
+function dispDot(valueObject, value)
+   if (activePt == NUMPTS+1) then return "None" end
+   return math.floor(activePt)
+end
+
+function dispX(valueObject, value)
+   if (activePt == NUMPTS+1) then return " ? " end
+   return math.floor(waveEnv[activePt][AX])
+end
+
+function dispY(valueObject, value)
+   if (activePt == NUMPTS+1) then return " ? " end
+   return math.floor(waveEnv[activePt][AY])
+end
+
+function adjustTime(valueObject, value)
+   if (activePt ~= NUMPTS+1) then
+      local t = clamp(value, TIME_MIN, TIME_MAX)
+      waveEnv[activePt][AX] = t
+      parameterMap.set(1, PT_VIRTUAL, UI_TIME_EDIT, t)
+      xyPadControl:repaint()
+   end
+end
+
+function adjustLevel(valueObject, value)
+   if (activePt ~= NUMPTS+1) then
+      local l = clamp(value, LEVEL_MIN, LEVEL_MAX)
+      waveEnv[activePt][AY] = l
+      parameterMap.set(1, PT_VIRTUAL, UI_LEVEL_EDIT, l)
+      xyPadControl:repaint()
+   end
+end
+
+function selectStage(valueObject, value)
+   waveEnv[activePt][CLR] = STD_COLOR
+   activePt = clamp(math.floor(value), 1, NUMPTS)
+   waveEnv[activePt][CLR] = ACT_COLOR
+
+   parameterMap.set(1, PT_VIRTUAL, UI_TIME_EDIT,  waveEnv[activePt][AX])
+   parameterMap.set(1, PT_VIRTUAL, UI_LEVEL_EDIT, waveEnv[activePt][AY])
+
+   xyPadControl:repaint()
+end
+
+local function txSynthEnvEditFocus(envNum)
+   local v1 = (envNum == 1) and 1 or 0
+   local v2 = (envNum == 2) and 1 or 0
+   local v3 = (envNum == 3) and 1 or 0
+
+   sendNRPN(channel, UI_ENV_EDIT_1, v1)
+   sendNRPN(channel, UI_ENV_EDIT_2, v2)
+   sendNRPN(channel, UI_ENV_EDIT_3, v3)
+
+   dprint(string.format("NRPN TX envFocus env=%d -> [45]=%d [46]=%d [47]=%d", envNum, v1, v2, v3))
+end
+
+local function getVisibleCaches()
+  local partSel = getPartSel()
+  local cmp = getCompareMode()
+  local srcSingle = cmp and singleBase or singleEdit
+  local srcPart = (partSel == 2)
+      and (cmp and part2Base or part2Edit)
+      or  (cmp and part1Base or part1Edit)
+  return srcSingle, srcPart
+end
+
+local function getVisibleCaches()
+  local partSel = getPartSel()
+  local cmp = getCompareMode()
+  local srcSingle = cmp and singleBase or singleEdit
+  local srcPart = (partSel == 2)
+      and (cmp and part2Base or part2Edit)
+      or  (cmp and part1Base or part1Edit)
+  return srcSingle, srcPart
+end
+
+function syncWaveEnvFromVisibleCaches()
+  local srcSingle, srcPart = getVisibleCaches()
+  local off = envOffset or 0
+
+  for i = 1, WAVEPTS do
+    local tPar = WENV_TIME_NRPN_BASE[i] + off
+    local lPar = WENV_LEVEL_NRPN_BASE[i] + off
+
+    local t = srcPart[tPar]
+    if t == nil then t = srcSingle[tPar] end
+
+    local l = srcPart[lPar]
+    if l == nil then l = srcSingle[lPar] end
+
+    if t ~= nil then waveEnv[i][AX] = clamp(t, TIME_MIN, TIME_MAX) end
+    if l ~= nil then waveEnv[i][AY] = clamp(l, LEVEL_MIN, LEVEL_MAX) end
+  end
+
+  -- keep edit knobs in sync with selected point
+  if activePt >= 1 and activePt <= WAVEPTS then
+    isApplyingCache = true
+    parameterMap.set(deviceId, PT_VIRTUAL, UI_TIME_EDIT,  waveEnv[activePt][AX])
+    parameterMap.set(deviceId, PT_VIRTUAL, UI_LEVEL_EDIT, waveEnv[activePt][AY])
+    isApplyingCache = false
+  end
+
+  if xyPadControl then xyPadControl:repaint() end
+
+end
+
+-- bind your env-target selector control callback to this (values 1..3)
+function selectTargetEnvelope(valueObject, value)
+  local raw = math.floor(value)
+  if raw >= 0 and raw <= 2 then raw = raw + 1 end -- list-control normalization
+
+  targetEnv = clamp(raw, 1, 3)
+  envOffset = targetEnv - 1
+  refreshLoopControlBindings()
+
+  syncWaveEnvFromVisibleCaches()
+
+  txSynthEnvEditFocus(targetEnv)
+
+  dprint(string.format("Target envelope set: target=%d offset=%d", targetEnv, envOffset))
+  xyPadControl:repaint()
+end
+
+-- Single-loop handlers (controls for loop state/start/end)
+function setState(valueObject, value)
+   local isOn = (value == 1)
+   txLoopState(isOn)
+end
+
+function setStart(valueObject, value)
+   local envIndex = getLoopEnvelopeTarget() + 1
+   local endValue = parameterMap.get(deviceId, PT_VIRTUAL, LOOP_END_NRPN_BASE[envIndex]) or 6
+   
+   if value >= endValue then
+      value = math.max(1, endValue - 1)
+   end
+   txLoopStart(value)
+end
+
+function setEnd(valueObject, value)
+   local envIndex = getLoopEnvelopeTarget() + 1
+   local startValue = parameterMap.get(deviceId, PT_VIRTUAL, LOOP_START_NRPN_BASE[envIndex]) or 1
+   
+   if value <= startValue then
+      value = math.min(6, startValue + 1)
+   end
+   txLoopEnd(value)
+end
+
+--------------------------------------------------------------------------------
+-- Parameter change callback (UI -> synth and cache)
+--------------------------------------------------------------------------------
+function parameterMap.onChange(valueObjects, origin, midiValue)
+  if (origin == MIDI) then return end
+
+  local msg   = valueObjects[1]:getMessage()
+  local pNum  = msg:getParameterNumber()
+  local pType = msg:getType()
+
+  ----------------------------------------------------------------------
+  -- 1) Envelope editor UI-only params (LUA-origin from controls/touch)
+  --    Handle these first, but DO NOT early-return for unrelated params.
+  ----------------------------------------------------------------------
+  if pNum == UI_TIME_EDIT then
+    if activePt >= 1 and activePt <= WAVEPTS then
+      txStageTime(activePt, midiValue)
+    end
+    return
+  end
+
+  if pNum == UI_LEVEL_EDIT then
+    if activePt >= 1 and activePt <= WAVEPTS then
+      txStageLevel(activePt, midiValue)
+    end
+    return
+  end
+
+  -- UI_STAGE_SELECT is consumed by your selectStage() callback path.
+  -- No NRPN send here.
+  if pNum == UI_STAGE_SELECT then
+    return
+  end
+
+  ----------------------------------------------------------------------
+  -- 2) Visibility / UI housekeeping
+  ----------------------------------------------------------------------
+  if pType == PT_VIRTUAL and (
+      pNum == PART_SELECT or
+      pNum == UNISON1_PARAM or
+      pNum == UNISON2_PARAM
+    ) then
+    refreshUnisonVisibility()
+  end
+
+  if pType == PT_VIRTUAL and pNum == PART_SELECT then
+    if midiValue == 1 then
+      controls.get(UNISON1_CTRL):setSlot(19, CTRL_PAGE)
+    elseif midiValue == 2 then
+      controls.get(UNISON2_CTRL):setSlot(19, CTRL_PAGE)
+    end
+
+    repaintFromVisibleCaches()  -- update param values (part1/part2)
+    syncWtUiFromSynthParams()
+    if syncWaveEnvFromVisibleCaches then syncWaveEnvFromVisibleCaches() end
+    return
+  end
+
+  if pType == PT_VIRTUAL and pNum == COMPARE_IT then
+    repaintFromVisibleCaches() -- update param values (original/edited)
+    syncWtUiFromSynthParams()
+    if syncWaveEnvFromVisibleCaches then syncWaveEnvFromVisibleCaches() end
+    if xyPadControl then xyPadControl:repaint() end
+    resendVisibleToSynth() -- update the synth (origibnal/edited)
+    return
+  end
+
+  ----------------------------------------------------------------------
+  -- 3) Sequencer start/stop
+  ----------------------------------------------------------------------
+  if pType == PT_VIRTUAL and pNum == SEQ_START_STOP then
+    if midiValue == 1 then
+      midi.sendMessage(port, { type = START })
+    else
+      midi.sendMessage(port, { type = STOP })
+    end
+    return
+  end
+
+  ----------------------------------------------------------------------
+  -- 4) FX naming updates
+  ----------------------------------------------------------------------
+  if pNum == FX1_TYPE then
+    updateFxParamNames(FX1_SPEC, midiValue, CTRL_FX1_NAME_IDS, "Param")
+  elseif pNum == FX2_TYPE then
+    updateFxParamNames(FX2_SPEC, midiValue, CTRL_FX2_NAME_IDS, "Param")
+  end
+
+  ----------------------------------------------------------------------
+  -- 5) Wavetable UI<->synth virtual mapping
+  ----------------------------------------------------------------------
+  local uiIdx = (pType == PT_VIRTUAL) and findIndex(WT_UI_PARAMS, pNum) or nil
+  if uiIdx and not wtSyncing then
+    wtSyncing = true
+    local s = uiToSynth(midiValue)
+
+    -- hide/show wavetable offset and pulse width
+    if s >= 256 and s <= 262 then
+      controls.get(CTRL_PULSE[uiIdx]):setSlot(TARGET_SLOT[uiIdx], OSC_PAGE)
+    else
+      controls.get(CTRL_OFFSET[uiIdx]):setSlot(TARGET_SLOT[uiIdx], OSC_PAGE)
+    end
+
+    parameterMap.set(deviceId, PT_VIRTUAL, WT_SYNTH_PARAMS[uiIdx], s)
+    wtSyncing = false
+    return
+  end
+
+  local syIdx = (pType == PT_VIRTUAL) and findIndex(WT_SYNTH_PARAMS, pNum) or nil
+  if syIdx and not wtSyncing then
+    wtSyncing = true
+    parameterMap.set(deviceId, PT_VIRTUAL, WT_UI_PARAMS[syIdx], synthToUi(midiValue))
+    wtSyncing = false
+    -- no return: continue to normal cache/NRPN path for synth param
+  end
+
+  ----------------------------------------------------------------------
+  -- 6) Never send while repainting cache into parameterMap
+  ----------------------------------------------------------------------
+  if isApplyingCache then return end
+
+  ----------------------------------------------------------------------
+  -- 7) Voice param edits -> cache + NRPN out
+  ----------------------------------------------------------------------
+  if pType == PT_VIRTUAL and isVoiceParam(pNum) then
+    local uiPar   = pNum
+    local outPar  = pNum
+    local partNum = getPartSel()
+    local ch      = resolvePartChannel(partNum)
+
+    if partNum == 2 then
+      outPar = toSynthParNumForPart(outPar, 2)
+    end
+
+    if not getCompareMode() then
+      if singleEdit[uiPar] ~= nil then
+        singleEdit[uiPar] = midiValue
+      end
+      if partNum == 2 then
+        part2Edit[uiPar] = midiValue
+      else
+        part1Edit[uiPar] = midiValue
+      end
+    end
+
+    sendNRPN(ch, outPar, midiValue)
+  end
+end
+
+-- set up graphic when change to the wave envelopes page
+function pages.onChange(newPageId, oldPageId)
+  if newPageId == W_ENV_PAGE then
+    -- wave envelope graphic 
+    local bounds = xyPadControl:getBounds()
+    bounds[WIDTH]  = math.floor(XY_PAD_WIDTH + 0.5)
+    bounds[HEIGHT] = math.floor(XY_PAD_HEIGHT + 0.5)
+    xyPadControl:setBounds(bounds)
+
+    xyPadControl:setPaintCallback(paintXyPad)
+    xyPadControl:setTouchCallback(touchCallback)
+
+    -- Stage selector control range (control 5 in your current layout)
+    local ctlId = controls.get(W_ENV_STAGE_CTRL)
+    local valId = ctlId:getValue("value")
+    valId:setRange(1, NUMPTS, 1, true)
+  end
+end

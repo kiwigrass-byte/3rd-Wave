@@ -15,7 +15,7 @@
 - Turning the **PATCH NAMES** switch 'on' retrieves all the patch names from all banks. The button should toggle to an 'off' state after all 500 names are read. The patch number fader will then display the patch names when scrolling. This process takes a couple of minutes to complete. The patch names are then stored locally on the E1 and are loaded immediately whenever the preset loads. If you later install different patches on the 3rd Wave or move the E1 preset to a different slot on the controller then repeat the process.
 - Only parameters for one part can be viewed and edited a time. Use the **PART VIEW** control to switch between the parsed part 1 and part 2 parameter values. 
 - Use the **COMPARE** control to switch between an edited sound (and UI) and the original patch sound (and UI). Very useful!
-- Thanks to @oldgearguy on the Electra One forum there is a **touch screen UI** for each of the three 6-stage wavetable-envelopes that makes visualizing and editing much easier and more fun. It should largely mimic the dynamic graphic on the 8M screen except only one envelope is shown at a time.  
+- Thanks to @oldgearguy on the Electra One forum there is a **touch screen UI** for each of the three 6-stage wavetable-envelopes that makes visualizing and editing much easier and more fun. It should largely mimic the dynamic graphic on the 8M screen except only one envelope is visible at a time.  
 - Various controls mimic the selection buttons on the 3rd Wave's front panel. 
 - **Dark blue** controls are global. **White** controls are patch level, and other **colored** controls are part-specific. Controls are hidden when not in use.
 

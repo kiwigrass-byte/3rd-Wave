@@ -59,6 +59,8 @@ local UI_STAGE_SELECT = 5008
 local UI_TIME_EDIT    = 5009
 local UI_LEVEL_EDIT   = 5010
 local UI_ENV_TARGET   = 5011   -- envelope target selector: 1..3
+local UI_ENV_LOOP_SYNC = 5012   -- set loop release position == loop start position
+
 
 -- Wave-envelope synth param bases (env 1); env 2/3 use +1/+2 via envOffset
 local WENV_TIME_NRPN_BASE  = {134, 137, 140, 143, 146, 149}
@@ -113,6 +115,7 @@ local W_ENV_STAGE_CTRL = 270
 local LOOP_STATE_CTRL = 252
 local LOOP_START_CTRL = 253
 local LOOP_END_CTRL = 254
+local LOOP_SYNC_CTRL = 264
 local XY_PAD_CTRL = 116
 
 ------------ Wave Envelope UI constants ----------

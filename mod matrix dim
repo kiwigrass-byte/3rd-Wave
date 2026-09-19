@@ -1,0 +1,12 @@
+-- synth parameter numbers for the 16x16 (diagonal) mod matrix 
+local MOD_SOURCE_PARAM = {181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196}       
+local MOD_DEST_PARAM   = {197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212}       
+local MOD_AMOUNT_PARAM = {296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311}
+
+-- control ids for mod matrix
+local CTRL_MOD_SOURCE = { 214, 130, 131, 132, 133, 134, 136, 137, 138, 153, 162, 169, 176, 180, 185, 188 }
+local CTRL_MOD_DEST   = { 129, 145, 148, 140, 146, 149, 142, 147, 150, 154, 164, 170, 178, 181, 186, 189 }
+local CTRL_MOD_AMOUNT = { 191, 135, 139, 141, 151, 155, 157, 173, 175, 177, 156, 167, 171, 179, 182, 187 }
+
+local orange = { off = 0x572700, on = ORANGE }
+

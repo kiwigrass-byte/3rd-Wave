@@ -10,3 +10,57 @@ local CTRL_MOD_AMOUNT = { 191, 135, 139, 141, 151, 155, 157, 173, 175, 177, 156,
 
 local orange = { off = 0x572700, on = ORANGE }
 
+-- fast lookup: control id -> slot index, so onChange handlers can resolve which slot fired
+local SRC_INDEX_BY_CTRL = {}
+local DST_INDEX_BY_CTRL = {}
+for i = 1, 16 do
+  SRC_INDEX_BY_CTRL[CTRL_MOD_SOURCE[i]] = i
+  DST_INDEX_BY_CTRL[CTRL_MOD_DEST[i]]   = i
+end
+
+-- recolor a single mod-matrix slot (source, destination, amount) based on
+-- whether source or destination is currently 0 ("none")
+local function updateModSlotColor(i)
+  local srcCtrl = controls.get(CTRL_MOD_SOURCE[i])
+  local dstCtrl = controls.get(CTRL_MOD_DEST[i])
+  local amtCtrl = controls.get(CTRL_MOD_AMOUNT[i])
+
+  if not (srcCtrl and dstCtrl and amtCtrl) then return end
+
+  local srcVal = srcCtrl:getValue()
+  local dstVal = dstCtrl:getValue()
+
+  local dim = (srcVal == 0) or (dstVal == 0)
+  local color = dim and orange.off or orange.on
+
+  srcCtrl:setColor(color)
+  dstCtrl:setColor(color)
+  amtCtrl:setColor(color)
+end
+
+-- refresh every slot, e.g. on preset load
+local function updateAllModSlots()
+  for i = 1, 16 do
+    updateModSlotColor(i)
+  end
+end
+
+-- attach these as the value-change handlers for the mod source / dest controls
+function modSourceChanged(valueObject, value)
+  local ctrlId = valueObject:getControl():getId()
+  local i = SRC_INDEX_BY_CTRL[ctrlId]
+  if i then updateModSlotColor(i) end
+  return value
+end
+
+function modDestChanged(valueObject, value)
+  local ctrlId = valueObject:getControl():getId()
+  local i = DST_INDEX_BY_CTRL[ctrlId]
+  if i then updateModSlotColor(i) end
+  return value
+end
+
+-- call this from preset.onReady() (or add it there) so colors are correct on load
+function preset.onReady()
+  updateAllModSlots()
+end

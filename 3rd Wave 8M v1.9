@@ -79,11 +79,6 @@ local UI_ENV_EDIT_3 = 47
 -- sequencer start/stop parameter
 local SEQ_START_STOP = 10043
 
--- synth parameter numbers for the 16x16 (diagonal) mod matrix 
-local MOD_SOURCE_PARAM = {181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196}       -- row source param numbers
-local MOD_DEST_PARAM   = {197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212}       -- column destination param numbers
-local MOD_AMOUNT_PARAM = {296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311}
-
 ---------------- ctrl ids -----------------------
 -- program number ctrl id
 local CTRL_PROG_NUMBER = 3
@@ -123,11 +118,6 @@ local LOOP_START_CTRL = 253
 local LOOP_END_CTRL = 254
 local LOOP_SYNC_CTRL = 264
 local XY_PAD_CTRL = 116
-
--- control ids for mod matrix.
-local CTRL_MOD_SOURCE = { 214, 130, 131, 132, 133, 134, 136, 137, 138, 153, 162, 169, 176, 180, 185, 188 }
-local CTRL_MOD_DEST   = { 129, 145, 148, 140, 146, 149, 142, 147, 150, 154, 164, 170, 178, 181, 186, 189 }
-local CTRL_MOD_AMOUNT = { 191, 135, 139, 141, 151, 155, 157, 173, 175, 177, 156, 167, 171, 179, 182, 187 }
 
 ------------ Wave Envelope UI constants ----------
 
@@ -219,7 +209,7 @@ local DESTINATION = {[0]="Destination off","osc 1 freq","osc 2 freq","osc 3 freq
 
 -- mod matrix source labels
 local SOURCE = {[0]="Source off","osc 1","osc 2","osc 3","filter envelope","amp envelope","LFO 1", "LFO 2","LFO 3", "LFO 4","envelope 3","envelope 4","osc1 wave env", "osc 2 wave env", "osc 3 wave env", "PB wheel", "Mod wheel",
-    "velocity", "pressure", "foot pedal", "midi expression", "note number", "random", "DC", "noise", "audio out", "audio in", "MPE PB", "MPE Y axis", "midi breath ctrl",
+    "velocity", "pressure", "foot pedal", "midi expression", "note number", "random", "DC offset", "noise", "audio out", "audio in", "MPE PB", "MPE Y axis", "midi breath ctrl",
 }
 
 -- FX1 (PARAM_227 type select, PARAM_228 sync, params 324/325/326 plus 345)
@@ -560,8 +550,33 @@ function waveTableFormat(valueObject, value)
   return ""
 end
 
+local colorConfigs = {
+  blue   = { off = 0x202067, on = BLUE },
+  orange = { off = 0x572700, on = ORANGE },
+  green = { off = 0x003930, on = GREEN },
+  red = { off = 0x401010, on = RED },
+}
+
+local PARAM_LFO_DEST = {213, 214, 215, 216}
+
+local CTRL_LFO = {  {193, 197, 201, 205, 209, 213, 218, 226, 222 },
+                  {194, 198, 202, 206, 210, 215, 219, 227, 223 },
+                  {195, 199, 203, 207, 211, 216, 220, 329, 224 },
+                  {196, 200, 204, 208, 212, 217, 221, 228, 225 },
+}
+
 -- mod matrix dim if source or destination = 0 is selected
 local orange = { off = 0x572700, on = ORANGE }
+
+-- synth parameter numbers for the 16x16 (diagonal) mod matrix 
+local MOD_SOURCE_PARAM = {181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196}       -- row source param numbers
+local MOD_DEST_PARAM   = {197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212}       -- column destination param numbers
+local MOD_AMOUNT_PARAM = {296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311}
+
+-- control ids for mod matrix.
+local CTRL_MOD_SOURCE = { 214, 130, 131, 132, 133, 134, 136, 137, 138, 153, 162, 169, 176, 180, 185, 188 }
+local CTRL_MOD_DEST   = { 129, 145, 148, 140, 146, 149, 142, 147, 150, 154, 164, 170, 178, 181, 186, 189 }
+local CTRL_MOD_AMOUNT = { 191, 135, 139, 141, 151, 155, 157, 173, 175, 177, 156, 167, 171, 179, 182, 187 }
 
 -- fast lookup: control id -> slot index, so onChange handlers can resolve which slot fired
 local SRC_INDEX_BY_CTRL = {}
@@ -974,7 +989,7 @@ local function getLoopEnvelopeTarget()
   return (parameterMap.get(deviceId, PT_VIRTUAL, UI_ENV_TARGET) or 1) - 1
 end
 
--- refresh the looper bindings
+-- refresh the looper bindings based on which wave envelope is active
 function refreshLoopControlBindings()
   local envIndex = getLoopEnvelopeTarget() + 1
   setControlParameterNumber(LOOP_STATE_CTRL, LOOP_STATE_NRPN_BASE[envIndex])
@@ -983,6 +998,7 @@ function refreshLoopControlBindings()
   repaintFromVisibleCaches()
 end
 
+-- callback to constrain active loop start < end
 function onLoopStartChanged(valueObject, value)
   local envIndex = getLoopEnvelopeTarget() + 1
   local endValue = parameterMap.get(deviceId, PT_VIRTUAL, LOOP_END_NRPN_BASE[envIndex]) or 6
@@ -993,6 +1009,7 @@ function onLoopStartChanged(valueObject, value)
   return value
 end
 
+-- callback to constrain active loop end > start
 function onLoopEndChanged(valueObject, value)
   local envIndex = getLoopEnvelopeTarget() + 1
   local startValue = parameterMap.get(deviceId, PT_VIRTUAL, LOOP_START_NRPN_BASE[envIndex]) or 1
@@ -1517,6 +1534,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
     sendNRPN(channel, 462, 1)
     sendNRPN(channel, 463, 3)
     sendNRPN(channel, 467, 1)
+    parameterMap.set(deviceId, PT_VIRTUAL, 463, 3)
   end
 
   ----------------------------------------------------------------------

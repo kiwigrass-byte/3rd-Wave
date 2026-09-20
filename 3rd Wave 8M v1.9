@@ -734,35 +734,6 @@ function adsrValueName(valueObject, value)
   -- print ("ctl = "..id..", base Name = "..ahdsrBaseNames[id])
 end
 
--------------------- Wave Envelope Loop Constraint Validation --------------------
--- Ensure Start < End for the same envelope target
--- Called when either Start or End control changes
-
-local function getLoopEnvelopeTarget()
-  -- Returns the currently selected envelope target (1-3, maps to 0-2 offset)
-  return (parameterMap.get(deviceId, PT_VIRTUAL, UI_ENV_TARGET) or 1) - 1
-end
-
-function onLoopStartChanged(valueObject, value)
-  local envIndex = getLoopEnvelopeTarget() + 1
-  local endValue = parameterMap.get(deviceId, PT_VIRTUAL, LOOP_END_NRPN_BASE[envIndex]) or 6
-  if value >= endValue then
-    value = math.max(1, endValue - 1)
-    parameterMap.set(deviceId, PT_VIRTUAL, LOOP_START_NRPN_BASE[envIndex], value)
-  end
-  return (string.format ("%.0f", value))
-end
-
-function onLoopEndChanged(valueObject, value)
-  local envIndex = getLoopEnvelopeTarget() + 1
-  local startValue = parameterMap.get(deviceId, PT_VIRTUAL, LOOP_START_NRPN_BASE[envIndex]) or 1
-  if value <= startValue then
-    value = math.min(6, startValue + 1)
-    parameterMap.set(deviceId, PT_VIRTUAL, LOOP_END_NRPN_BASE[envIndex], value)
-  end
-  return (string.format ("%.0f", value))
-end
-
 ------------------------------------------------------------------
 --                  midi request functions                  --
 ------------------------------------------------------------------
@@ -994,12 +965,42 @@ local function setControlParameterNumber(ctrlId, parameterNumber)
   message:setParameterNumber(parameterNumber)
 end
 
+-------------------- Wave Envelope Loop Constraint Validation --------------------
+-- Ensure Start < End for the same envelope target
+-- Called when either Start or End control changes
+
+-- Returns the currently selected envelope target (1-3, maps to 0-2 offset)
+local function getLoopEnvelopeTarget()
+  return (parameterMap.get(deviceId, PT_VIRTUAL, UI_ENV_TARGET) or 1) - 1
+end
+
+-- refresh the looper bindings
 function refreshLoopControlBindings()
   local envIndex = getLoopEnvelopeTarget() + 1
   setControlParameterNumber(LOOP_STATE_CTRL, LOOP_STATE_NRPN_BASE[envIndex])
   setControlParameterNumber(LOOP_START_CTRL, LOOP_START_NRPN_BASE[envIndex])
   setControlParameterNumber(LOOP_END_CTRL, LOOP_END_NRPN_BASE[envIndex])
   repaintFromVisibleCaches()
+end
+
+function onLoopStartChanged(valueObject, value)
+  local envIndex = getLoopEnvelopeTarget() + 1
+  local endValue = parameterMap.get(deviceId, PT_VIRTUAL, LOOP_END_NRPN_BASE[envIndex]) or 6
+  if value >= endValue then
+    value = math.max(1, endValue - 1)
+    parameterMap.set(deviceId, PT_VIRTUAL, LOOP_START_NRPN_BASE[envIndex], value)
+  end
+  return value
+end
+
+function onLoopEndChanged(valueObject, value)
+  local envIndex = getLoopEnvelopeTarget() + 1
+  local startValue = parameterMap.get(deviceId, PT_VIRTUAL, LOOP_START_NRPN_BASE[envIndex]) or 1
+  if value <= startValue then
+    value = math.min(6, startValue + 1)
+    parameterMap.set(deviceId, PT_VIRTUAL, LOOP_END_NRPN_BASE[envIndex], value)
+  end
+  return value
 end
 
 --------------------------------------------------------------------------------
@@ -1488,28 +1489,9 @@ end
 
 -- Single-loop handlers (controls for loop state/start/end)
 function setState(valueObject, value)
-   local isOn = (value == 1)
-   txLoopState(isOn)
-end
-
-function setStart(valueObject, value)
-   local envIndex = getLoopEnvelopeTarget() + 1
-   local endValue = parameterMap.get(deviceId, PT_VIRTUAL, LOOP_END_NRPN_BASE[envIndex]) or 6
-   
-   if value >= endValue then
-      value = math.max(1, endValue - 1)
-   end
-   txLoopStart(value)
-end
-
-function setEnd(valueObject, value)
-   local envIndex = getLoopEnvelopeTarget() + 1
-   local startValue = parameterMap.get(deviceId, PT_VIRTUAL, LOOP_START_NRPN_BASE[envIndex]) or 1
-   
-   if value <= startValue then
-      value = math.min(6, startValue + 1)
-   end
-   txLoopEnd(value)
+  local isOn = (value == 1)
+  txLoopState(isOn)
+  return value
 end
 
 --------------------------------------------------------------------------------

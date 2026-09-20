@@ -439,6 +439,11 @@ function displayBpm(valueObject,value)
    return(math.floor(value) .. " bpm")
 end
 
+-- Value formatter for controls whose values are represented by their names.
+function displayBlank(valueObject, value)
+  return (" ") -- space is needed 
+end
+
 -- FX2 param 2 when type = shimmer reverb (-12 .. + 12)
 function fx2Param2(valueObject,value)
   local fx2Num = parameterMap.get(deviceId, PT_VIRTUAL, FX2_TYPE)
@@ -744,11 +749,6 @@ function auxDestination(valueObject, value)
   local i = AUX_DEST_INDEX_BY_CTRL[ctrlId]
   if i then updateAuxSlotColor(i) end
   return value
-end
-
--- Value formatter for controls whose values are represented by their names.
-function displayBlank(valueObject, value)
-  return (" ") -- space is needed 
 end
 
 -- control visibility of part 1/2 unison params

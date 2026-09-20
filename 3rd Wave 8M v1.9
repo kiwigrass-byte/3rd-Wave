@@ -37,6 +37,7 @@ local bankTxt={"B1","B2","B3","B4","B5"}
 local authorDate = "kiwigrass 2026" 
 
 ------------ virtual parameter numbers ----------------
+local GLOBAL_SETTINGS_PARAM = 10044
 local BANK_NUMBER = 10032
 local PROG_NUMBER = 10033
 local PART_SELECT = 10029 -- not nrpn 69 which displays part info on 3rd Wave's screen
@@ -1522,7 +1523,22 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   local pType = msg:getType()
 
   ----------------------------------------------------------------------
-  -- 1) Envelope editor UI-only params (LUA-origin from controls/touch)
+  -- 1) Set Global params to preset required values
+  ----------------------------------------------------------------------
+  if pType == PT_VIRTUAL and pNum == GLOBAL_SETTINGS_PARAM and midiValue == 1 then
+    sendNRPN(channel, 445, 1)
+    sendNRPN(channel, 446, 2)
+    sendNRPN(channel, 447, 2)
+    sendNRPN(channel, 448, 1)
+    sendNRPN(channel, 449, 1)
+    sendNRPN(channel, 461, 1)
+    sendNRPN(channel, 462, 1)
+    sendNRPN(channel, 463, 3)
+    sendNRPN(channel, 467, 1)
+  end
+
+  ----------------------------------------------------------------------
+  -- 2) Envelope editor UI-only params (LUA-origin from controls/touch)
   --    Handle these first, but DO NOT early-return for unrelated params.
   ----------------------------------------------------------------------
   if pNum == UI_TIME_EDIT then
@@ -1546,7 +1562,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   end
 
   ----------------------------------------------------------------------
-  -- 2) Visibility / UI housekeeping
+  -- 3) Visibility / UI housekeeping
   ----------------------------------------------------------------------
   if pType == PT_VIRTUAL and (
       pNum == PART_SELECT or
@@ -1579,7 +1595,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   end
 
   ----------------------------------------------------------------------
-  -- 3) Sequencer start/stop
+  -- 4) Sequencer start/stop
   ----------------------------------------------------------------------
   if pType == PT_VIRTUAL and pNum == SEQ_START_STOP then
     if midiValue == 1 then
@@ -1591,7 +1607,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   end
 
   ----------------------------------------------------------------------
-  -- 4) FX naming updates
+  -- 5) FX naming updates
   ----------------------------------------------------------------------
   if pNum == FX1_TYPE then
     updateFxParamNames(FX1_SPEC, midiValue, CTRL_FX1_NAME_IDS, "Param")
@@ -1600,7 +1616,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   end
 
   ----------------------------------------------------------------------
-  -- 5) Wavetable UI<->synth virtual mapping
+  -- 6) Wavetable UI<->synth virtual mapping
   ----------------------------------------------------------------------
   local uiIdx = (pType == PT_VIRTUAL) and findIndex(WT_UI_PARAMS, pNum) or nil
   if uiIdx and not wtSyncing then
@@ -1628,12 +1644,12 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
   end
 
   ----------------------------------------------------------------------
-  -- 6) Never send while repainting cache into parameterMap
+  -- 7) Never send while repainting cache into parameterMap
   ----------------------------------------------------------------------
   if isApplyingCache then return end
 
   ----------------------------------------------------------------------
-  -- 7) Voice param edits -> cache + NRPN out
+  -- 8) Voice param edits -> cache + NRPN out
   ----------------------------------------------------------------------
   if pType == PT_VIRTUAL and isVoiceParam(pNum) then
     local uiPar   = pNum
@@ -1658,6 +1674,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
 
     sendNRPN(ch, outPar, midiValue)
   end
+
 end
 
 -- set up graphic when change to the wave envelopes page

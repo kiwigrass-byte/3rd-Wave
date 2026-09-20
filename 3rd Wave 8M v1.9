@@ -196,20 +196,20 @@ local WT_SEGMENTS = {
 }
 
 -- mod matrix destination labels
-local DESTINATION = {[0]="Destination off","osc 1 freq","osc 2 freq","osc 3 freq","osc all freq","osc 1 level","osc 2 level", "osc 3 level","osc all level", "osc 1 wave env","osc 2 wave env","osc 3 wave env","osc all wave env",
-    "osc 1 FM amount", "osc2 FM amount","osc3 FM amount", "osc all FM amount", "osc 1 drift", "osc 2 drift", "osc 3 drift", "osc all drift", "osc 1 PW", "osc 2 PW", "osc 3 PW", "osc all PW", "LPF drive", "LPF cutoff", 
-    "LPF resonance", "not used", "SVF cutoff","SVF resonance", "SVF mode", "LFO 1 freq", "LFO 2 freq", "LFO 3 freq", "LFO 4 freq", "LFO all freq", "LFO 1 amount", "LFO 2 amount", "LFO 3 amount", "LFO 4 amount", "LFO all amount", 
-    "LPF env amount", "amp env amount","env 3 amount", "env 4 amount", "SVF env amount", "wave env amount", "all env amount", "f-env attack", "a-env attack", "env 3 attack", "env 4 attack", "env all attack", "f-env decay",
-    "a-env decay", "env 3 decay", "env 4 decay", "env all decay", "f-env sustain", "a-env sustain", "env 3 sustain", "env 4 sustain", "env all sustain", "f-env release", "a-env release", "env 3 release", "env 4 release",
-    "env all release", "w-env o1/t1", "w-env o2/t1", "w-env o3/t1", "w-env o1/t2", "w-env o2/t2", "w-env o3/t2", "w-env o1/t3", "w-env o2/t3", "w-env o3/t3", "w-env o1/t4", "w-env o2/t4", "w-env o3/t4", "w-env o1/t5", "w-env o5/t5",
-    "w-env o3/t5", "w-env o1/t6", "w-env o2/t6", "w-env o3/t6", "w-env o1/p1", "w-env o2/p1", "w-env o3/p1", "w-env o1/p2", "w-env o2/p2", "w-env o3/p2", "w-env o1/p3", "w-env o2/p3", "w-env o3/p3", "w-env o1/p4", "w-env o2/p4",
-    "w-env o3/p4", "w-env o1/p5", "w-env o2/p5", "w-env o3/p5", "w-env o1/p6", "w-env o2/p6", "w-env o3/p6", "pan spread", "effect 1 mix", "effect 1 par 1", "effect 1 par 2", "effect 1 par 3", "effect 2 mix", "effect 2 par 1", 
-    "effect 2 par 2", "effect 2 par 3", "osc 1 fine", "osc 2 fine", "osc 3 fine", "osc all fine", "mod 1 amount", "mod 2 amount", "mod 3 amount", "mod 4 amount", "mod 5 amount", "mod 6 amount", "mod 7 amount", "mod 8 amount", "smpl start time",
+local DESTINATION = {[0]="Destination Off","Osc 1 Freq","Osc 2 Freq","Osc 3 Freq","Osc All Freq","Osc 1 Level","Osc 2 Level", "Osc 3 Level","Osc All Level", "Osc 1 Wave Env","Osc 2 Wave Env","Osc 3 Wave Env","Osc All Wave Env",
+    "Osc 1 FM Amount", "Osc2 FM Amount","Osc3 FM Amount", "Osc all FM Amount", "Osc 1 drift", "Osc 2 drift", "Osc 3 drift", "Osc all drift", "Osc 1 PW", "Osc 2 PW", "Osc 3 PW", "Osc all PW", "LPF drive", "LPF cutoff", 
+    "LPF resonance", "not used", "SVF cutoff","SVF resonance", "SVF mode", "LFO 1 freq", "LFO 2 freq", "LFO 3 freq", "LFO 4 freq", "LFO all freq", "LFO 1 Amount", "LFO 2 Amount", "LFO 3 Amount", "LFO 4 Amount", "LFO all Amount", 
+    "LPF Env Amount", "A-Env Amount","Env 3 Amount", "Env 4 Amount", "SVF Env Amount", "wave Env Amount", "all Env Amount", "F-Env Attack", "A-Env Attack", "Env 3 Attack", "Env 4 Attack", "Env all Attack", "F-Env Decay",
+    "A-Env Decay", "Env 3 Decay", "Env 4 Decay", "Env all Decay", "F-Env Sustain", "A-Env Sustain", "Env 3 Sustain", "Env 4 Sustain", "Env all Sustain", "F-Env Release", "A-Env Release", "Env 3 Release", "Env 4 Release",
+    "Env all Release", "W-Env o1/t1", "W-Env o2/t1", "W-Env o3/t1", "W-Env o1/t2", "W-Env o2/t2", "W-Env o3/t2", "W-Env o1/t3", "W-Env o2/t3", "W-Env o3/t3", "W-Env o1/t4", "W-Env o2/t4", "W-Env o3/t4", "W-Env o1/t5", "W-Env o5/t5",
+    "W-Env o3/t5", "W-Env o1/t6", "W-Env o2/t6", "W-Env o3/t6", "W-Env o1/p1", "W-Env o2/p1", "W-Env o3/p1", "W-Env o1/p2", "W-Env o2/p2", "W-Env o3/p2", "W-Env o1/p3", "W-Env o2/p3", "W-Env o3/p3", "W-Env o1/p4", "W-Env o2/p4",
+    "W-Env o3/p4", "W-Env o1/p5", "W-Env o2/p5", "W-Env o3/p5", "W-Env o1/p6", "W-Env o2/p6", "W-Env o3/p6", "pan spread", "effect 1 mix", "effect 1 par 1", "effect 1 par 2", "effect 1 par 3", "effect 2 mix", "effect 2 par 1", 
+    "effect 2 par 2", "effect 2 par 3", "Osc 1 fine", "Osc 2 fine", "Osc 3 fine", "Osc all fine", "mod 1 Amount", "mod 2 Amount", "mod 3 Amount", "mod 4 Amount", "mod 5 Amount", "mod 6 Amount", "mod 7 Amount", "mod 8 Amount", "smpl start time",
 }
 
 -- mod matrix source labels
-local SOURCE = {[0]="Source off","osc 1","osc 2","osc 3","filter envelope","amp envelope","LFO 1", "LFO 2","LFO 3", "LFO 4","envelope 3","envelope 4","osc1 wave env", "osc 2 wave env", "osc 3 wave env", "PB wheel", "Mod wheel",
-    "velocity", "pressure", "foot pedal", "midi expression", "note number", "random", "DC offset", "noise", "audio out", "audio in", "MPE PB", "MPE Y axis", "midi breath ctrl",
+local SOURCE = {[0]="Source Off","Osc 1","Osc 2","Osc 3","Filter Envelope","Amp Envelope","LFO 1", "LFO 2","LFO 3", "LFO 4","Envelope 3","Envelope 4","Osc 1 Wave Env", "Osc 2 Wave Env", "Osc 3 Wave Env", "PB wheel", "Mod wheel",
+    "Velocity", "Pressure", "Foot Pedal", "MIDI Expression", "Note Number", "Random", "DC Offset", "Noise", "Audio Out", "Audio In", "MPE PB", "MPE Y axis", "MIDI Breath Ctrl",
 }
 
 -- FX1 (PARAM_227 type select, PARAM_228 sync, params 324/325/326 plus 345)
@@ -550,6 +550,7 @@ function waveTableFormat(valueObject, value)
   return ""
 end
 
+-- dim unused LFO's if destination value = 0
 local colorConfigs = {
   blue   = { off = 0x202067, on = BLUE },
   orange = { off = 0x572700, on = ORANGE },
@@ -565,13 +566,60 @@ local CTRL_LFO = {  {193, 197, 201, 205, 209, 213, 218, 226, 222 },
                   {196, 200, 204, 208, 212, 217, 221, 228, 225 },
 }
 
+-- color assigned to each LFO row (1=LFO1 ... 4=LFO4)
+local LFO_ROW_COLOR = { colorConfigs.blue, colorConfigs.orange, colorConfigs.green, colorConfigs.red }
+
+-- destination control is the 4th id in each row's array
+local function getLfoDestCtrlId(i)
+  return CTRL_LFO[i][4]
+end
+
+-- fast lookup: destination control id -> row index, for onChange handler
+local LFO_DEST_INDEX_BY_CTRL = {}
+for i = 1, 4 do
+  LFO_DEST_INDEX_BY_CTRL[getLfoDestCtrlId(i)] = i
+end
+
+-- recolor an entire LFO row based on whether its destination == 0 ("off")
+local function updateLfoRowColor(i)
+  local destVal = parameterMap.get(deviceId, PT_VIRTUAL, PARAM_LFO_DEST[i])
+
+  -- Do not dim if the parameter has not been read yet.
+  if destVal == nil then
+    return
+  end
+
+  local cfg = LFO_ROW_COLOR[i]
+  local color = (destVal == 0) and cfg.off or cfg.on
+
+  for _, ctrlId in ipairs(CTRL_LFO[i]) do
+    local c = controls.get(ctrlId)
+    if c then c:setColor(color) end
+  end
+end
+
+-- refresh every LFO row, e.g. on preset load
+local function updateAllLfoRows()
+  for i = 1, 4 do
+    updateLfoRowColor(i)
+  end
+end
+
+-- update name and dim status of an LFO destination control
+function lfoDestination(valueObject, value)
+  local ctrlId = valueObject:getControl():getId()
+  controls.get(ctrlId):setName(DESTINATION[value])
+  local i = LFO_DEST_INDEX_BY_CTRL[ctrlId]
+  if i then updateLfoRowColor(i) end
+  return value
+end
+
 -- mod matrix dim if source or destination = 0 is selected
 local orange = { off = 0x572700, on = ORANGE }
 
 -- synth parameter numbers for the 16x16 (diagonal) mod matrix 
-local MOD_SOURCE_PARAM = {181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196}       -- row source param numbers
-local MOD_DEST_PARAM   = {197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212}       -- column destination param numbers
-local MOD_AMOUNT_PARAM = {296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311}
+local PARAM_MOD_SOURCE = {181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196}       -- row source param numbers
+local PARAM_MOD_DEST   = {197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212}       -- column destination param numbers
 
 -- control ids for mod matrix.
 local CTRL_MOD_SOURCE = { 214, 130, 131, 132, 133, 134, 136, 137, 138, 153, 162, 169, 176, 180, 185, 188 }
@@ -597,8 +645,8 @@ local function updateModSlotColor(i)
     return
   end
 
-  local srcVal = parameterMap.get(deviceId, PT_VIRTUAL, MOD_SOURCE_PARAM[i])
-  local dstVal = parameterMap.get(deviceId, PT_VIRTUAL, MOD_DEST_PARAM[i])
+  local srcVal = parameterMap.get(deviceId, PT_VIRTUAL, PARAM_MOD_SOURCE[i])
+  local dstVal = parameterMap.get(deviceId, PT_VIRTUAL, PARAM_MOD_DEST[i])
 
   -- Do not dim if the parameter has not been read yet.
   if srcVal == nil or dstVal == nil then
@@ -641,6 +689,66 @@ function source(valueObject,value)
   local i = SRC_INDEX_BY_CTRL[ctrlId]
   if i then updateModSlotColor(i) end
   return value
+end
+
+-- 4 fixed auxiliary mod sources, each with a destination and an amount
+local CTRL_AUX_DEST   = {238, 240, 239, 241}
+local CTRL_AUX_AMOUNT = {332, 334, 337, 339}
+local PARAM_AUX_DEST  = {222, 223, 224, 225}
+
+-- fast lookup: destination control id -> aux index, so onChange handler can resolve which aux fired
+local AUX_DEST_INDEX_BY_CTRL = {}
+for i = 1, 4 do
+  AUX_DEST_INDEX_BY_CTRL[CTRL_AUX_DEST[i]] = i
+end
+
+-- recolor a single aux slot (destination, amount) based on
+-- whether destination is currently 0 ("none")
+local function updateAuxSlotColor(i)
+  local dstCtrl = controls.get(CTRL_AUX_DEST[i])
+  local amtCtrl = controls.get(CTRL_AUX_AMOUNT[i])
+
+  if not (dstCtrl and amtCtrl) then
+    return
+  end
+
+  local dstVal = parameterMap.get(deviceId, PT_VIRTUAL, PARAM_AUX_DEST[i])
+
+  -- Do not dim if the parameter has not been read yet.
+  if dstVal == nil then
+    return
+  end
+
+  local color
+  if dstVal == 0 then
+    color = orange.off
+  else
+    color = orange.on
+  end
+
+  dstCtrl:setColor(color)
+  amtCtrl:setColor(color)
+end
+
+-- refresh every aux slot, e.g. on preset load
+local function updateAllAuxSlots()
+  for i = 1, 4 do
+    updateAuxSlotColor(i)
+  end
+end
+
+-- update names and dim status of aux destination controls
+function auxDestination(valueObject, value)
+  local ctrlId = valueObject:getControl():getId()
+  controls.get(ctrlId):setName(DESTINATION[value])
+  local i = AUX_DEST_INDEX_BY_CTRL[ctrlId]
+  if i then updateAuxSlotColor(i) end
+  return value
+end
+
+-- Value formatter for controls whose values are represented by their names.
+function displayBlank(valueObject, value)
+  return (" ") -- space is needed 
 end
 
 -- control visibility of part 1/2 unison params
@@ -1707,5 +1815,6 @@ end
 function preset.onReady()
   getWaveCount(nil,1) -- number of wave tables
   updateAllModSlots()
+  updateAllLfoRows()
 end
 

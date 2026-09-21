@@ -1036,6 +1036,35 @@ local function setControlParameterNumber(ctrlId, parameterNumber)
   message:setParameterNumber(parameterNumber)
 end
 
+local function setWavetableSlot(idx, synthValue)
+  local pulseCtrl  = controls.get(CTRL_PULSE[idx])
+  local offsetCtrl = controls.get(CTRL_OFFSET[idx])
+  local isAnalog = synthValue >= 256 and synthValue <= 262
+
+  if isAnalog then
+    if offsetCtrl then offsetCtrl:setVisible(false) end
+    if pulseCtrl then
+      pulseCtrl:setSlot(TARGET_SLOT[idx], OSC_PAGE)
+      pulseCtrl:setVisible(true)
+    end
+  else
+    if pulseCtrl then pulseCtrl:setVisible(false) end
+    if offsetCtrl then
+      offsetCtrl:setSlot(TARGET_SLOT[idx], OSC_PAGE)
+      offsetCtrl:setVisible(true)
+    end
+  end
+end
+
+local function refreshWavetableSlots()
+  for i, synthParam in ipairs(WT_SYNTH_PARAMS) do
+    local synthValue =
+      parameterMap.get(deviceId, PT_VIRTUAL, synthParam) or 0
+
+    setWavetableSlot(i, synthValue)
+  end
+end
+
 -------------------- Wave Envelope Loop Constraint Validation --------------------
 -- Ensure Start < End for the same envelope target
 -- Called when either Start or End control changes
@@ -1199,6 +1228,8 @@ function midi.onSysex(midiInput, sysexBlock)
     refreshUnisonVisibility()
     refreshLoopControlBindings()
     syncWaveEnvFromVisibleCaches()
+    -- Must be last: restore the oscillator slot placement after all repaint work.
+    refreshWavetableSlots()
 
   elseif cmd == 0x11 then
     local bankNum = sysexBlock:peek(7)+1
@@ -1680,12 +1711,7 @@ function parameterMap.onChange(valueObjects, origin, midiValue)
     local s = uiToSynth(midiValue)
 
     -- hide/show wavetable offset and pulse width
-    if s >= 256 and s <= 262 then
-      controls.get(CTRL_PULSE[uiIdx]):setSlot(TARGET_SLOT[uiIdx], OSC_PAGE)
-    else
-      controls.get(CTRL_OFFSET[uiIdx]):setSlot(TARGET_SLOT[uiIdx], OSC_PAGE)
-    end
-
+    setWavetableSlot(uiIdx, s)
     parameterMap.set(deviceId, PT_VIRTUAL, WT_SYNTH_PARAMS[uiIdx], s)
     wtSyncing = false
     return
@@ -1764,4 +1790,3 @@ function preset.onReady()
   refreshUnisonVisibility()
   lfoGroup:updateAll(); modGroup:updateAll(); auxGroup:updateAll()
 end
-

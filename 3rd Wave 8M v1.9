@@ -555,199 +555,154 @@ function waveTableFormat(valueObject, value)
   return ""
 end
 
--- dim unused LFO's if destination value = 0
+-- ============================================================
+-- Generic "dim group" helper
+-- A "group" is a set of slots. Each slot has:
+--   - one or more trigger param numbers (any of them == 0 -> dim)
+--   - a list of control ids that get recolored together
+--   - an on/off color pair (either per-slot or shared per-group)
+-- ============================================================
+
+local function makeDimGroup(def)
+  -- def = {
+  --   triggerParams = { {p1}, {p1,...} , ... }  -- one entry per slot; each entry is a list of param#s
+  --   controlIds    = { {c1,c2,...}, ... }       -- one entry per slot; controls to recolor
+  --   colors        = { {off=..,on=..}, ... } OR a single {off=..,on=..} shared by all slots
+  -- }
+  local group = { triggerParams = def.triggerParams, controlIds = def.controlIds, colors = def.colors }
+
+  -- fast lookup: control id -> slot index (built from every control id in every slot)
+  group.indexByCtrl = {}
+  for i, ids in ipairs(group.controlIds) do
+    for _, id in ipairs(ids) do
+      group.indexByCtrl[id] = i
+    end
+  end
+
+  function group:colorFor(i)
+    if self.colors[1] and self.colors[1].off then
+      return self.colors[1] -- shared single color config
+    end
+    return self.colors[i]
+  end
+
+  function group:update(i)
+    local cfg = self:colorFor(i)
+    if not cfg then return end
+
+    local dim = false
+    for _, p in ipairs(self.triggerParams[i]) do
+      local v = parameterMap.get(deviceId, PT_VIRTUAL, p)
+      if v == nil then return end -- not read yet; don't touch color
+      if v == 0 then dim = true end
+    end
+
+    local color = dim and cfg.off or cfg.on
+    for _, ctrlId in ipairs(self.controlIds[i]) do
+      local c = controls.get(ctrlId)
+      if c then c:setColor(color) end
+    end
+  end
+
+  function group:updateAll()
+    for i = 1, #self.controlIds do self:update(i) end
+  end
+
+  function group:onCtrlChange(ctrlId)
+    local i = self.indexByCtrl[ctrlId]
+    if i then self:update(i) end
+  end
+
+  return group
+end
+
+-- ---------------- LFO rows ----------------
 local colorConfigs = {
   blue   = { off = 0x202067, on = BLUE },
   orange = { off = 0x572700, on = ORANGE },
-  green = { off = 0x003930, on = GREEN },
-  red = { off = 0x401010, on = RED },
+  green  = { off = 0x003930, on = GREEN },
+  red    = { off = 0x401010, on = RED },
+  yellow = { off = 0x505000, on = 0xF1F50E },
+  white  = { off = 0x202020, on = 0xFFFFFF },
+  grey   = { off = 0x101010, on = 0x6F6F6F },
+  purple = { off = 0x401040, on = PURPLE },
 }
 
 local PARAM_LFO_DEST = {213, 214, 215, 216}
-
-local CTRL_LFO = {  {193, 197, 201, 205, 209, 213, 218, 226, 222 },
-                  {194, 198, 202, 206, 210, 215, 219, 227, 223 },
-                  {195, 199, 203, 207, 211, 216, 220, 329, 224 },
-                  {196, 200, 204, 208, 212, 217, 221, 228, 225 },
+local CTRL_LFO = {
+  {193, 197, 201, 205, 209, 213, 218, 226, 222},
+  {194, 198, 202, 206, 210, 215, 219, 227, 223},
+  {195, 199, 203, 207, 211, 216, 220, 329, 224},
+  {196, 200, 204, 208, 212, 217, 221, 228, 225},
 }
 
--- color assigned to each LFO row (1=LFO1 ... 4=LFO4)
-local LFO_ROW_COLOR = { colorConfigs.blue, colorConfigs.orange, colorConfigs.green, colorConfigs.red }
+local lfoGroup = makeDimGroup{
+  triggerParams = { {PARAM_LFO_DEST[1]}, {PARAM_LFO_DEST[2]}, {PARAM_LFO_DEST[3]}, {PARAM_LFO_DEST[4]} },
+  controlIds    = CTRL_LFO,
+  colors        = { colorConfigs.blue, colorConfigs.orange, colorConfigs.green, colorConfigs.red },
+}
 
--- destination control is the 4th id in each row's array
-local function getLfoDestCtrlId(i)
-  return CTRL_LFO[i][4]
-end
-
--- fast lookup: destination control id -> row index, for onChange handler
-local LFO_DEST_INDEX_BY_CTRL = {}
-for i = 1, 4 do
-  LFO_DEST_INDEX_BY_CTRL[getLfoDestCtrlId(i)] = i
-end
-
--- recolor an entire LFO row based on whether its destination == 0 ("off")
-local function updateLfoRowColor(i)
-  local destVal = parameterMap.get(deviceId, PT_VIRTUAL, PARAM_LFO_DEST[i])
-
-  -- Do not dim if the parameter has not been read yet.
-  if destVal == nil then
-    return
-  end
-
-  local cfg = LFO_ROW_COLOR[i]
-  local color = (destVal == 0) and cfg.off or cfg.on
-
-  for _, ctrlId in ipairs(CTRL_LFO[i]) do
-    local c = controls.get(ctrlId)
-    if c then c:setColor(color) end
-  end
-end
-
--- refresh every LFO row, e.g. on preset load
-local function updateAllLfoRows()
-  for i = 1, 4 do
-    updateLfoRowColor(i)
-  end
-end
-
--- update name and dim status of an LFO destination control
 function lfoDestination(valueObject, value)
   local ctrlId = valueObject:getControl():getId()
   controls.get(ctrlId):setName(DESTINATION[value])
-  local i = LFO_DEST_INDEX_BY_CTRL[ctrlId]
-  if i then updateLfoRowColor(i) end
+  lfoGroup:onCtrlChange(ctrlId)
   return value
 end
 
--- mod matrix dim if source or destination = 0 is selected
-local orange = { off = 0x572700, on = ORANGE }
+-- ---------------- Mod matrix (16 slots, source+dest triggers) ----------------
+local PARAM_MOD_SOURCE = {181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196}
+local PARAM_MOD_DEST   = {197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212}
+local CTRL_MOD_SOURCE = {214,130,131,132,133,134,136,137,138,153,162,169,176,180,185,188}
+local CTRL_MOD_DEST   = {129,145,148,140,146,149,142,147,150,154,164,170,178,181,186,189}
+local CTRL_MOD_AMOUNT = {191,135,139,141,151,155,157,173,175,177,156,167,171,179,182,187}
 
--- synth parameter numbers for the 16x16 (diagonal) mod matrix 
-local PARAM_MOD_SOURCE = {181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196}       -- row source param numbers
-local PARAM_MOD_DEST   = {197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212}       -- column destination param numbers
-
--- control ids for mod matrix.
-local CTRL_MOD_SOURCE = { 214, 130, 131, 132, 133, 134, 136, 137, 138, 153, 162, 169, 176, 180, 185, 188 }
-local CTRL_MOD_DEST   = { 129, 145, 148, 140, 146, 149, 142, 147, 150, 154, 164, 170, 178, 181, 186, 189 }
-local CTRL_MOD_AMOUNT = { 191, 135, 139, 141, 151, 155, 157, 173, 175, 177, 156, 167, 171, 179, 182, 187 }
-
--- fast lookup: control id -> slot index, so onChange handlers can resolve which slot fired
-local SRC_INDEX_BY_CTRL = {}
-local DST_INDEX_BY_CTRL = {}
+local modTriggerParams, modControlIds = {}, {}
 for i = 1, 16 do
-  SRC_INDEX_BY_CTRL[CTRL_MOD_SOURCE[i]] = i
-  DST_INDEX_BY_CTRL[CTRL_MOD_DEST[i]]   = i
+  modTriggerParams[i] = { PARAM_MOD_SOURCE[i], PARAM_MOD_DEST[i] }
+  modControlIds[i]    = { CTRL_MOD_SOURCE[i], CTRL_MOD_DEST[i], CTRL_MOD_AMOUNT[i] }
 end
 
--- recolor a single mod-matrix slot (source, destination, amount) based on
--- whether source or destination is currently 0 ("none")
-local function updateModSlotColor(i)
-  local srcCtrl = controls.get(CTRL_MOD_SOURCE[i])
-  local dstCtrl = controls.get(CTRL_MOD_DEST[i])
-  local amtCtrl = controls.get(CTRL_MOD_AMOUNT[i])
+local modGroup = makeDimGroup{
+  triggerParams = modTriggerParams,
+  controlIds    = modControlIds,
+  colors        = { colorConfigs.orange },
+}
 
-  if not (srcCtrl and dstCtrl and amtCtrl) then
-    return
-  end
-
-  local srcVal = parameterMap.get(deviceId, PT_VIRTUAL, PARAM_MOD_SOURCE[i])
-  local dstVal = parameterMap.get(deviceId, PT_VIRTUAL, PARAM_MOD_DEST[i])
-
-  -- Do not dim if the parameter has not been read yet.
-  if srcVal == nil or dstVal == nil then
-    return
-  end
-
-  local color
-
-  if srcVal == 0 or dstVal == 0 then
-    color = orange.off
-  else
-    color = orange.on
-  end
-
-  srcCtrl:setColor(color)
-  dstCtrl:setColor(color)
-  amtCtrl:setColor(color)
-end
-
--- refresh every slot, e.g. on preset load
-local function updateAllModSlots()
-  for i = 1, 16 do
-    updateModSlotColor(i)
-  end
-end
-
--- update names of mod matrix destination controls
-function destination(valueObject,value)
+function destination(valueObject, value)
   local ctrlId = valueObject:getControl():getId()
-  controls.get(ctrlId):setName (DESTINATION[value])
-  local i = DST_INDEX_BY_CTRL[ctrlId]
-  if i then updateModSlotColor(i) end
+  controls.get(ctrlId):setName(DESTINATION[value])
+  modGroup:onCtrlChange(ctrlId)
   return value
 end
 
--- update names and dim status of mod matrix source controls
-function source(valueObject,value)
+function source(valueObject, value)
   local ctrlId = valueObject:getControl():getId()
-  controls.get(ctrlId):setName (SOURCE[value])
-  local i = SRC_INDEX_BY_CTRL[ctrlId]
-  if i then updateModSlotColor(i) end
+  controls.get(ctrlId):setName(SOURCE[value])
+  modGroup:onCtrlChange(ctrlId)
   return value
 end
 
--- 4 fixed auxiliary mod sources, each with a destination and an amount
+-- ---------------- Aux (4 slots, dest-only trigger) ----------------
 local CTRL_AUX_DEST   = {238, 240, 239, 241}
 local CTRL_AUX_AMOUNT = {332, 334, 337, 339}
 local PARAM_AUX_DEST  = {222, 223, 224, 225}
 
--- fast lookup: destination control id -> aux index, so onChange handler can resolve which aux fired
-local AUX_DEST_INDEX_BY_CTRL = {}
+local auxTriggerParams, auxControlIds = {}, {}
 for i = 1, 4 do
-  AUX_DEST_INDEX_BY_CTRL[CTRL_AUX_DEST[i]] = i
+  auxTriggerParams[i] = { PARAM_AUX_DEST[i] }
+  auxControlIds[i]    = { CTRL_AUX_DEST[i], CTRL_AUX_AMOUNT[i] }
 end
 
--- recolor a single aux slot (destination, amount) based on
--- whether destination is currently 0 ("none")
-local function updateAuxSlotColor(i)
-  local dstCtrl = controls.get(CTRL_AUX_DEST[i])
-  local amtCtrl = controls.get(CTRL_AUX_AMOUNT[i])
+local auxGroup = makeDimGroup{
+  triggerParams = auxTriggerParams,
+  controlIds    = auxControlIds,
+  colors        = { colorConfigs.orange },
+}
 
-  if not (dstCtrl and amtCtrl) then
-    return
-  end
-
-  local dstVal = parameterMap.get(deviceId, PT_VIRTUAL, PARAM_AUX_DEST[i])
-
-  -- Do not dim if the parameter has not been read yet.
-  if dstVal == nil then
-    return
-  end
-
-  local color
-  if dstVal == 0 then
-    color = orange.off
-  else
-    color = orange.on
-  end
-
-  dstCtrl:setColor(color)
-  amtCtrl:setColor(color)
-end
-
--- refresh every aux slot, e.g. on preset load
-local function updateAllAuxSlots()
-  for i = 1, 4 do
-    updateAuxSlotColor(i)
-  end
-end
-
--- update names and dim status of aux destination controls
 function auxDestination(valueObject, value)
   local ctrlId = valueObject:getControl():getId()
   controls.get(ctrlId):setName(DESTINATION[value])
-  local i = AUX_DEST_INDEX_BY_CTRL[ctrlId]
-  if i then updateAuxSlotColor(i) end
+  auxGroup:onCtrlChange(ctrlId)
   return value
 end
 
@@ -840,21 +795,14 @@ function displayPatchName (valueObject, value)
   return (bankTxt[bankNum].."-"..string.format("P%03d",value+1))
 end
 
--- ── ADSR value-in-name suffix ───────────────────────────────────────────────
--- Appends the live value of an ADSR envelope's primary stage to its tile
--- title, e.g. "AMP ATTACK" -> "AMP ATTACK 101". The base (unsuffixed) name is
--- captured the first time each control is seen so repeat updates don't keep
--- stacking suffixes onto an already-modified name.
-
+-- Appends the live value of an ADSR envelope's primary stage to its name
 local adsrBaseNames = {}
 
 function adsrValueName(valueObject, value)
   local ctrl = valueObject:getControl()
-  --if not ctrl then return end
   local id = ctrl:getId()
   if not adsrBaseNames[id] then adsrBaseNames[id] = ctrl:getName() end
   ctrl:setName(adsrBaseNames[id] .. " " .. string.format("%d", value))
-  -- print ("ctl = "..id..", base Name = "..ahdsrBaseNames[id])
 end
 
 ------------------------------------------------------------------
@@ -1808,13 +1756,12 @@ end
 function preset.onLoad()
   loadNameBank()  -- restore cached patch names first
   pages.display(1)
-  refreshUnisonVisibility()
 end
 
 -- called after loading 
 function preset.onReady()
   getWaveCount(nil,1) -- number of wave tables
-  updateAllModSlots()
-  updateAllLfoRows()
+  refreshUnisonVisibility()
+  lfoGroup:updateAll(); modGroup:updateAll(); auxGroup:updateAll()
 end
 

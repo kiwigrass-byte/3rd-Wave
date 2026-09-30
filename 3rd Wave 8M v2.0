@@ -64,7 +64,6 @@ local UI_LEVEL_EDIT   = 5010
 local UI_ENV_TARGET   = 5011   -- envelope target selector: 1..3
 local UI_ENV_LOOP_SYNC = 5012   -- set loop release position == loop start position
 
-
 -- Wave-envelope synth param bases (env 1); env 2/3 use +1/+2 via envOffset
 local WENV_TIME_NRPN_BASE  = {134, 137, 140, 143, 146, 149}
 local WENV_LEVEL_NRPN_BASE = {265, 268, 271, 274, 277, 280}
@@ -916,7 +915,7 @@ function startPatchScanner(valueObject, value)
   patchScanState.isRunning = true
   patchScanState.bank = 1
   patchScanState.patch = 0
-  print("Starting patch scanner: 4 banks × 128 patches")
+  print("Starting patch scanner: 5 banks × 100 patches")
   scanHandle = schedule.every( SCAN_PERIOD_MS, scanNextPatch  )
 end
 
